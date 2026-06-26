@@ -1,0 +1,7 @@
+image: nav2_map.pgm
+mode: trinary
+resolution: 0.01
+origin: [-1.746821, -1.450843, 0.0]
+negate: 1
+occupied_thresh: 0.65
+free_thresh: 0.196

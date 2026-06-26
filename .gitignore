@@ -1,5 +1,6 @@
 *.rar
 *:Zone.Identifier
+*Zone.Identifier
 node_modules/
 .env
 .venv/
@@ -24,3 +25,8 @@ input/video_input/corridor_hloc/
 input/video_input/corridor_retrieval/
 output/corridor_map/
 output/corridor_trajectory/
+
+# 3D assets (large binary files)
+*.glb
+*.ply
+*.splat

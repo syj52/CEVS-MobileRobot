@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AGV Digital Twin</title>
+    <style>
+      /* 确保页面没有任何间距，且背景为深灰色（方便区分黑屏） */
+      body { 
+        margin: 0; 
+        padding: 0; 
+        overflow: hidden; 
+        background-color: #222; 
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 将UI监视器放到 body 中 -->
+    <div id="map-monitor" style="position: absolute; top: 10px; left: 10px; width: 200px; height: 220px; min-width: 150px; min-height: 120px; resize: both; overflow: hidden; flex-direction: column; border: 2px solid #00ffff; background: rgba(0,0,0,0.8); z-index: 1000; display: none;">
+        <div style="color: #00ffff; font-size: 12px; padding: 2px; text-align: center; border-bottom: 1px solid #00ffff;">地图判定监控 (MiniMap)</div>
+        <canvas id="mini-map-canvas" style="flex: 1; width: 100%; image-rendering: pixelated;"></canvas>
+    </div>
+
+    <!-- 日志面板 -->
+    <div id="log-panel" style="position: absolute; bottom: 10px; left: 10px; right: 260px; height: 130px; min-height: 60px; resize: both; overflow: hidden; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.75); z-index: 999; border-radius: 4px;">
+        <div style="display: flex; align-items: center; padding: 2px 6px; background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1);" id="log-header">
+            <span style="color: #aaa; font-size: 11px; flex: 1; user-select: none;">系统日志</span>
+            <span style="color: #666; font-size: 10px; margin-right: 8px; user-select: none;" id="log-badge">0</span>
+            <span style="color: #666; font-size: 11px; cursor: pointer;" id="log-clear-btn" title="清空">✕</span>
+        </div>
+        <div id="log-list" style="flex: 1; overflow-y: auto; padding: 2px 0;"></div>
+        <!-- 手动 LLM 输入 -->
+        <div style="display:flex;gap:4px;padding:3px 4px;border-top:1px solid rgba(255,255,255,0.08);" id="log-input-row">
+            <input id="log-llm-input" type="text" placeholder="模拟 LLM 分析..." style="flex:1;font-size:11px;padding:2px 4px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:#ccc;border-radius:2px;outline:none;">
+            <button id="log-llm-send" style="font-size:10px;padding:2px 8px;background:rgba(200,136,255,0.15);border:1px solid rgba(200,136,255,0.3);color:#cc88ff;border-radius:2px;cursor:pointer;">发送</button>
+        </div>
+    </div>
+
+    <!-- 脚本放在UI元素之后 -->
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
