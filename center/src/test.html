@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32-Center</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2332;
+    --border: #2a3a50;
+    --text: #e8edf4;
+    --muted: #7a8ba0;
+    --accent: #3b82f6;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --purple: #a855f7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Consolas', 'Courier New', monospace; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; color: var(--accent); letter-spacing: 2px; }
+  .subtitle { color: var(--muted); font-size: 0.8rem; margin-bottom: 20px; }
+  .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; max-width: 1200px; width: 100%; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .panel-title { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .status-bar { display: flex; gap: 10px; margin-bottom: 20px; font-size: 0.8rem; flex-wrap: wrap; }
+  .badge { padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; }
+  .badge-esp { background: #1a2a1a; color: var(--muted); border: 1px solid #2a3a2a; }
+  .badge-esp.connected { background: #0d2818; color: var(--green); border-color: var(--green); }
+  .badge-tcp { background: #1a1a2a; color: var(--muted); border: 1px solid #2a2a3a; }
+  .badge-tcp.connected { background: #0d1828; color: var(--accent); border-color: var(--accent); }
+  .badge-status { background: #1a1a1a; color: var(--muted); border: 1px solid #2a2a2a; }
+  .badge-status.moving { background: #1a1800; color: var(--yellow); border-color: var(--yellow); }
+  .badge-status.idle { background: #001a0d; color: var(--green); border-color: var(--green); }
+  .badge-status.error { background: #1a0000; color: var(--red); border-color: var(--red); }
+  .state-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .state-item { background: #111820; border-radius: 6px; padding: 10px 12px; }
+  .state-label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .state-value { font-size: 1.1rem; color: var(--accent); margin-top: 2px; }
+  .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn { padding: 10px; border-radius: 6px; border: 1px solid var(--border); background: #111820; color: var(--text); font-family: inherit; font-size: 0.8rem; cursor: pointer; transition: all 0.15s; }
+  .btn:hover { background: #1e2a3a; border-color: var(--accent); }
+  .btn:active { transform: scale(0.97); }
+  .btn.green { border-color: var(--green); color: var(--green); }
+  .btn.green:hover { background: #0d2818; }
+  .btn.red { border-color: var(--red); color: var(--red); }
+  .btn.red:hover { background: #1a0808; }
+  .btn.purple { border-color: var(--purple); color: var(--purple); }
+  .btn.purple:hover { background: #1a0818; }
+  .btn.full { grid-column: 1 / -1; }
+  .nav-form { display: grid; grid-template-columns: 60px 1fr; gap: 6px; align-items: center; margin-top: 10px; font-size: 0.78rem; color: var(--muted); }
+  .nav-form input { background: #111820; border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 7px 10px; font-family: inherit; font-size: 0.85rem; }
+  .nav-form input:focus { outline: none; border-color: var(--accent); }
+  .nav-form label { text-align: right; }
+
+  /* Map canvas */
+  .map-wrap { display: flex; flex-direction: column; align-items: center; }
+  .map-wrap canvas { border: 1px solid var(--border); border-radius: 6px; background: #000; max-width: 100%; image-rendering: pixelated; }
+  .map-info { display: flex; gap: 20px; margin-top: 10px; font-size: 0.75rem; color: var(--muted); width: 100%; justify-content: center; }
+  .map-info span { display: flex; align-items: center; gap: 6px; }
+
+  /* Right side tabs */
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tabs button { padding: 6px 14px; border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 6px 6px 0 0; cursor: pointer; font-family: inherit; font-size: 0.78rem; }
+  .tabs button.active { background: var(--panel); color: var(--text); border-bottom-color: var(--panel); }
+
+  .log-container { overflow-y: auto; max-height: 350px; }
+  .log-line { padding: 3px 0; font-size: 0.8rem; border-bottom: 1px solid #0f1820; display: flex; gap: 10px; }
+  .log-line .ts { color: var(--muted); min-width: 75px; }
+  .log-line .dir { min-width: 36px; font-weight: bold; }
+  .log-line .dir.tx { color: var(--accent); }
+  .log-line .dir.rx { color: var(--green); }
+  .log-line .dir.err { color: var(--red); }
+  .log-line .dir.info { color: var(--muted); }
+  .log-line .dir.sys { color: var(--yellow); }
+  .log-line .msg { color: var(--text); }
+  .log-clear { margin-top: 10px; }
+  .log-clear .btn { width: 100%; font-size: 0.75rem; padding: 6px; }
+  @media (max-width: 700px) { .layout { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>ESP32-P4 Center</h1>
+
+<div class="status-bar">
+  <span class="badge badge-esp" id="espBadge">ESP</span>
+  <span class="badge badge-tcp" id="tcpBadge">Center</span>
+  <span class="badge badge-status idle" id="statusBadge">IDLE</span>
+  <span class="badge" id="mapBadge" style="background:#1a1a2a;color:var(--muted);border:1px solid #2a2a3a">Map: --</span>
+</div>
+
+<div class="layout">
+  <!-- Left: panel -->
+  <div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-title">Robot</div>
+      <div class="state-grid">
+        <div class="state-item"><div class="state-label">X</div><div class="state-value" id="posX">0.00</div></div>
+        <div class="state-item"><div class="state-label">Y</div><div class="state-value" id="posY">0.00</div></div>
+      </div>
+      <div style="display:flex;gap:10px;font-size:0.75rem;color:var(--muted);margin-bottom:12px">
+        <span id="lastUpdate">--</span>
+        <span id="rtt">--</span>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-title">Commands</div>
+      <div class="btn-grid">
+        <button class="btn green" onclick="sendPing()">PING</button>
+        <button class="btn purple" onclick="sendNav(1,1)">NAV 1,1</button>
+        <button class="btn purple" onclick="sendNav(0,0)">NAV 0,0</button>
+        <button class="btn red full" onclick="sendStop()">STOP</button>
+      </div>
+      <div class="nav-form">
+        <label>X</label><input type="number" id="navX" value="3.0" step="0.1">
+        <label>Y</label><input type="number" id="navY" value="2.0" step="0.1">
+        <label>Speed</label><input type="number" id="navSpeed" value="1.0" step="0.1">
+        <label></label><button class="btn green" onclick="sendNavCustom()" style="padding:7px">Send NAV</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Tests</div>
+      <div class="btn-grid">
+        <button class="btn full" onclick="runTestSuite()" id="runAllBtn">Run All</button>
+        <button class="btn" onclick="tcPing()">PING</button>
+        <button class="btn" onclick="tcNav()">NAV</button>
+        <button class="btn" onclick="tcStop()">STOP</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: tabs + content -->
+  <div>
+    <div class="tabs">
+      <button class="active" data-tab="map" onclick="switchTab('map')">Map</button>
+      <button data-tab="log" onclick="switchTab('log')">Log</button>
+    </div>
+
+    <div id="tab-map" class="panel map-wrap">
+      <div class="panel-title" style="width:100%">Grid Map</div>
+      <canvas id="mapCanvas"></canvas>
+      <div class="map-info">
+        <span id="mapSize">Size: --</span>
+        <span>Free <span style="display:inline-block;width:12px;height:12px;background:#fff;border:1px solid #555;vertical-align:middle"></span></span>
+        <span>Blocked <span style="display:inline-block;width:12px;height:12px;background:#222;border:1px solid #555;vertical-align:middle"></span></span>
+        <span id="mapPoi" style="color:var(--purple)">POI: --</span>
+      </div>
+    </div>
+
+    <div id="tab-log" class="panel" style="display:none">
+      <div class="panel-title">Log</div>
+      <div class="log-container" id="logContainer"></div>
+      <div class="log-clear"><button class="btn" onclick="clearLog()">Clear</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const BASE = window.location.origin;
+  let espConnected = false;
+  let pollInt = null;
+
+  function ts(){const d=new Date();return`${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}.${d.getMilliseconds().toString().padStart(3,'0')}`}
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  function log(dir,msg,cls){
+    const c=document.getElementById('logContainer'),l=document.createElement('div');
+    l.className='log-line';l.innerHTML=`<span class="ts">${ts()}</span><span class="dir ${dir}">${dir.toUpperCase()}</span><span class="msg ${cls}">${esc(msg)}</span>`;
+    c.appendChild(l);c.scrollTop=c.scrollHeight;
+  }
+  function clearLog(){document.getElementById('logContainer').innerHTML='';log('sys','cleared','sys')}
+  function switchTab(t){document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));['map','log'].forEach(id=>document.getElementById('tab-'+id).style.display=id===t?'':'none')}
+
+  // ─── Map rendering ───
+  function renderMap(data,meta){
+    const can=document.getElementById('mapCanvas');
+    const info=document.getElementById('mapSize');
+    const poiEl=document.getElementById('mapPoi');
+    if(!data||!meta){info.textContent='Size: no map';can.width=can.height=0;return;}
+    const w=meta.width,h=meta.height,CELL=24;
+    can.width=w*CELL;can.height=h*CELL;
+    const x=can.getContext('2d');
+    info.textContent=`Size: ${w}×${h} (${(w*meta.res).toFixed(1)}m × ${(h*meta.res).toFixed(1)}m)`
+    // Draw cells
+    for(let r=0;r<h;r++){
+      for(let c=0;c<w;c++){
+        const v=data[r*w+c];
+        x.fillStyle=v===254?'#d0d0d0':'#1a1a2a';
+        x.fillRect(c*CELL,r*CELL,CELL,CELL);
+      }
+    }
+    // Grid lines
+    x.strokeStyle='#2a3a50';x.lineWidth=0.5;
+    for(let r=0;r<=h;r++){x.beginPath();x.moveTo(0,r*CELL);x.lineTo(w*CELL,r*CELL);x.stroke()}
+    for(let c=0;c<=w;c++){x.beginPath();x.moveTo(c*CELL,0);x.lineTo(c*CELL,h*CELL);x.stroke()}
+    // Path (from server)
+    fetch('/api/path').then(r=>r.json()).then(pd=>{
+      if(pd.waypoints&&pd.waypoints.length>1){
+        x.strokeStyle='#60a5fa';x.lineWidth=3;
+        x.beginPath();
+        pd.waypoints.forEach((wp,i)=>{
+          const cx=(wp[0]-meta.ox)/meta.res,cy=(wp[1]-meta.oy)/meta.res;
+          i===0?x.moveTo(cx*CELL+CELL/2,cy*CELL+CELL/2):x.lineTo(cx*CELL+CELL/2,cy*CELL+CELL/2);
+        });
+        x.stroke();
+        // Goal marker
+        const last=pd.waypoints[pd.waypoints.length-1];
+        const gcx=(last[0]-meta.ox)/meta.res,gcy=(last[1]-meta.oy)/meta.res;
+        x.fillStyle='#f59e0b';
+        x.beginPath();x.arc(gcx*CELL+CELL/2,gcy*CELL+CELL/2,6,0,Math.PI*2);x.fill();
+      }
+    }).catch(()=>{});
+    // Robot
+    const rx=meta.robotX!=null?meta.robotX:0,ry=meta.robotY!=null?meta.robotY:0;
+    const px=(rx-meta.ox)/meta.res,py=((ry-meta.oy)/meta.res);
+    x.fillStyle='#22c55e';
+    x.beginPath();x.arc(px*CELL+CELL/2,py*CELL+CELL/2,CELL/3,0,Math.PI*2);x.fill();
+    x.fillStyle='#fff';x.font='11px sans';x.textAlign='center';x.fillText('R',px*CELL+CELL/2,py*CELL+CELL/2+4);
+    // POIs
+    fetch('/api/poi').then(r=>r.json()).then(pois=>{
+      poiEl.textContent='POI: '+pois.length;
+      pois.forEach(p=>{
+        const cx=(p.coord_x-meta.ox)/meta.res,cy=(p.coord_y-meta.oy)/meta.res;
+        x.fillStyle='#a855f7';x.beginPath();x.arc(cx*CELL+CELL/2,cy*CELL+CELL/2,5,0,Math.PI*2);x.fill();
+        x.fillStyle='#fff';x.font='9px sans';x.textAlign='center';
+        x.fillText(p.name,cx*CELL+CELL/2,cy*CELL+CELL/2-8);
+      });
+    }).catch(()=>{});
+  }
+
+  // ─── Map click → A* nav ───
+  document.addEventListener('click', function(e){
+    const can=document.getElementById('mapCanvas');
+    const rect=can.getBoundingClientRect();
+    const ex=e.clientX-rect.left,ey=e.clientY-rect.top;
+    if(ex<0||ex>can.width||ey<0||ey>can.height)return;
+    // Fetch map meta to convert pixel → world
+    fetch('/api/map').then(r=>r.json()).then(meta=>{
+      // Pixel to grid cell
+      const CELL=24;
+      const col=Math.floor(ex/CELL),row=Math.floor(ey/CELL);
+      if(col<0||col>=meta.width||row<0||row>=meta.height)return;
+      const wx=(col+0.5)*meta.res+meta.ox,wy=(row+0.5)*meta.res+meta.oy;
+      log('sys',`Click map: (${wx.toFixed(2)}, ${wy.toFixed(2)}) sending A*...`,'sys');
+      fetch('/api/nav-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({x:wx,y:wy})})
+        .then(r=>r.json()).then(d=>{
+          if(d.ok)log('sys',`A* route: ${d.waypoints.length} waypoints`,'sys');
+          else log('err',`A*: ${d.error||'no path'}`,'err');
+        }).catch(e=>log('err','Nav failed: '+e.message,'err'));
+    });
+  });
+
+  async function fetchMap(){
+    try{
+      const metaR=await fetch('/api/map');if(!metaR.ok)return;
+      const meta=await metaR.json();
+      const dataR=await fetch('/api/map/data');if(!dataR.ok)return;
+      const buf=await dataR.arrayBuffer();const data=new Uint8Array(buf);
+      const stateR=await fetch('/api/robot');const state=stateR.ok?await stateR.json():{};
+      meta.robotX=state.position?.x;meta.robotY=state.position?.y;
+      renderMap(data,meta);
+      document.getElementById('mapBadge').textContent=`Map: ${meta.width}×${meta.height}`;
+      document.getElementById('mapBadge').style='background:#0d2818;color:var(--green);border:1px solid var(--green)';
+    }catch(e){console.warn('map fetch error',e)}
+  }
+
+  // ─── API ───
+  function setStatus(s){
+    const b=document.getElementById('statusBadge');b.textContent=s.toUpperCase();
+    b.className='badge badge-status '+s;
+  }
+  async function http(method,path,body){
+    const start=performance.now();
+    const opts={method,headers:{'Content-Type':'application/json'}};if(body)opts.body=JSON.stringify(body);
+    const res=await fetch(BASE+path,opts);const data=await res.json().catch(()=>({}));
+    document.getElementById('rtt').textContent=Math.round(performance.now()-start)+'ms';
+    return {status:res.status,data};
+  }
+  async function pollState(){
+    try{
+      const {data}=await http('GET','/api/robot');
+      document.getElementById('posX').textContent=data.position?.x?.toFixed(2)??'--';
+      document.getElementById('posY').textContent=data.position?.y?.toFixed(2)??'--';
+      document.getElementById('lastUpdate').textContent=data.lastUpdate?new Date(data.lastUpdate).toLocaleTimeString():'--';
+      setStatus(data.status||'unknown');
+      const realEsp = data.tcp_connected === true;
+      if(realEsp !== espConnected){
+        espConnected = realEsp;
+        if(realEsp){
+          document.getElementById('espBadge').textContent='ESP ok';document.getElementById('espBadge').className='badge badge-esp connected';
+          document.getElementById('tcpBadge').textContent='Online';document.getElementById('tcpBadge').className='badge badge-tcp connected';
+          log('sys','ESP connected','sys');
+        } else {
+          document.getElementById('espBadge').textContent='ESP';document.getElementById('espBadge').className='badge badge-esp';
+          document.getElementById('tcpBadge').textContent='Online';document.getElementById('tcpBadge').className='badge badge-tcp connected';
+          log('sys','ESP disconnected','sys');
+        }
+      }
+    }catch(e){
+      if(espConnected){espConnected=false;
+        document.getElementById('espBadge').textContent='ESP';document.getElementById('espBadge').className='badge badge-esp';
+        document.getElementById('tcpBadge').textContent='Offline';document.getElementById('tcpBadge').className='badge badge-tcp';
+      }
+    }
+  }
+
+  async function sendNav(x,y,speed){
+    speed=speed||1.0;log('tx',`NAV ${x},${y}`,`cmd`);
+    const r=await http('POST','/api/nav',{x,y,speed});
+    log('rx',`${r.status} ${JSON.stringify(r.data)}`,r.status<400?'res':'err');await pollState();await fetchMap();
+  }
+  async function sendNavCustom(){
+    const x=parseFloat(document.getElementById('navX').value),y=parseFloat(document.getElementById('navY').value),s=parseFloat(document.getElementById('navSpeed').value)||1;
+    if(isNaN(x)||isNaN(y))return;await sendNav(x,y,s);
+  }
+  async function sendPing(){log('tx','PING');await pollState();log('rx','pong','res');}
+  async function sendStop(){
+    log('tx','STOP','cmd');const r=await http('POST','/api/stop');
+    log('rx',`${r.status} ${JSON.stringify(r.data)}`,r.status<400?'res':'err');await pollState();await fetchMap();
+  }
+
+  async function delay(ms){return new Promise(r=>setTimeout(r,ms))}
+  async function tcPing(){log('info','--- TC: PING ---','sys');await sendPing();}
+  async function tcNav(){log('info','--- TC: NAV 1,1 ---','sys');await sendNav(1,1);}
+  async function tcStop(){log('info','--- TC: STOP ---','sys');await sendStop();}
+
+  async function runTestSuite(){
+    const btn=document.getElementById('runAllBtn');btn.disabled=true;btn.textContent='Running...';
+    clearLog();await delay(500);await tcPing();await delay(1000);await tcNav();await delay(8000);await tcStop();await delay(500);
+    log('sys','Test suite done','sys');btn.disabled=false;btn.textContent='Run All';
+  }
+
+  // ─── Init ───
+  pollState();
+  fetchMap();
+  setInterval(pollState,3000);
+  setInterval(fetchMap,1500);
+  log('sys','Ready: http://localhost:'+window.location.port,'sys');
+</script>
+</body>
+</html>
