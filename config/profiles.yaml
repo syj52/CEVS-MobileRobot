@@ -1,0 +1,36 @@
+# LingBot-MAP 参数配置
+# 基于 RTX 5060 8GB 调优
+
+profiles:
+  # 极致性能（内存优先）
+  performance:
+    num_scale_frames: 2
+    kv_cache_sliding_window: 20
+    keyframe_interval: 2
+    camera_num_iterations: 1
+    use_sdpa: true
+    offload_to_cpu: true
+    downsample_factor: 20
+    note: "显存峰值 ~6.5 GB"
+
+  # 平衡模式（推荐）
+  balanced:
+    num_scale_frames: 2
+    kv_cache_sliding_window: 20
+    keyframe_interval: 2
+    camera_num_iterations: 2
+    use_sdpa: true
+    offload_to_cpu: true
+    downsample_factor: 15
+    note: "显存峰值 ~6.8 GB"
+
+  # 质量优先（可能需要更大显存）
+  quality:
+    num_scale_frames: 4
+    kv_cache_sliding_window: 20
+    keyframe_interval: 1
+    camera_num_iterations: 2
+    use_sdpa: true
+    offload_to_cpu: true
+    downsample_factor: 10
+    note: "显存峰值 ~7.2 GB"

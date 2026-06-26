@@ -1,0 +1,31 @@
+app:
+  host: "127.0.0.1"
+  port: 8000
+
+llm:
+  # 自定义云端大模型 API 地址（必填）
+  api_url: "https://ai-gateway.vei.volces.com/v1/chat/completions"
+  # 实际值放 .env 的 LLM_API_KEY，避免密钥进 git
+  api_key: "${LLM_API_KEY}"
+  model: "doubao-seed-1.6-flash"
+  timeout: 30
+  # 支持多模态的模型（如有）
+  vision_model: "doubao-seed-1.6-flash"
+  # 默认的提示词
+  prompt: "请介绍你自己"
+
+event:
+  window_size: 20
+
+mqtt:
+  # MQTT broker 地址（小车端运行 mosquito 或 vernemq）
+  host: "localhost"
+  port: 1883
+  # 话题定义
+  topic_voice: "cmd/voice_text"       # 小车 → 云端：语音/文字指令
+  topic_nav: "cmd/nav_goal"           # 云端 → 小车：导航目标坐标
+  topic_position: "state/position"    # 小车 → 云端：实时位置上报
+  topic_stop: "cmd/stop"              # 云端 → 小车：紧急停止
+
+db:
+  path: "./data/controller.db"

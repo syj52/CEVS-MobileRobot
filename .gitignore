@@ -1,0 +1,26 @@
+*.rar
+*:Zone.Identifier
+node_modules/
+.env
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+.claude/
+controller/controller/.venv/
+
+# Large media / data files
+input/video_input/*.mp4
+input/video_input/*.h5
+input/video_input/**/*.h5
+input/video_input/*.db
+input/video_input/**/*.db
+input/video_input/*.jpg
+input/video_input/**/*.jpg
+input/video_input/CA_frames/
+input/video_input/corridor_output/
+input/video_input/corridor_hloc/
+input/video_input/corridor_retrieval/
+output/corridor_map/
+output/corridor_trajectory/
