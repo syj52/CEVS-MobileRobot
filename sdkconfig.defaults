@@ -1,0 +1,18 @@
+CONFIG_IDF_TARGET="esp32p4"
+
+# ESP-IDF v5.5.x defaults the firmware to chip revision v3.0+.
+# Function EV Board V1.5.2 ships with revision v1.3, so we must
+# explicitly tell ESP-IDF to build for the "preliminary" P4 (rev < 3.0).
+# Without this, esptool will refuse to flash with:
+#   'bootloader.bin' requires chip revision in range [v3.0 - v3.99]
+#                      (this chip is revision v1.3)
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+
+# Enable external PSRAM (Function EV Board has 8 MB Octal PSRAM).
+# Required: camera frame buffer (1920×1088×2 = 4 MB) cannot fit in internal SRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# Reserve modest internal RAM for SDIO DMA (PSRAM not DMA-capable for SDIO)
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768

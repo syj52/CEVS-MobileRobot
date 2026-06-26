@@ -1,0 +1,39 @@
+menu "Robot Gateway WiFi"
+
+    config ESP_WIFI_SSID
+        string "WiFi SSID"
+        default "Redmi K70"
+
+    config ESP_WIFI_PASSWORD
+        string "WiFi password"
+        default "ljq050511"
+        help
+            Password for the target WiFi network.
+
+    config ESP_WIFI_STA_MAX_RETRY
+        int "Max WiFi reconnection retries"
+        default 10
+
+    config ESP_WIFI_STA_RECONNECT_DELAY_MS
+        int "WiFi reconnection delay (ms)"
+        default 5000
+
+endmenu
+
+menu "Robot Gateway TCP"
+
+    config PC_SERVER_IP
+        string "PC server IP address"
+        default "192.168.1.44"
+        help
+            IP address of the PC that runs the TCP server.
+            The ESP32-P4 will act as a TCP client and connect to this address.
+
+    config PC_SERVER_PORT
+        int "PC server TCP port"
+        default 5000
+        range 1 65535
+        help
+            TCP port of the PC server.
+
+endmenu

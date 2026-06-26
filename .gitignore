@@ -1,0 +1,9 @@
+build/
+.cache/
+sdkconfig.old
+*.bin
+*.elf
+*.map
+center/node_modules/
+center/dist/
+managed_components/
