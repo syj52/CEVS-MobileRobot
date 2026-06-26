@@ -1,0 +1,34 @@
+# === 编译产物 (不提交) ===
+Debug/
+Release/
+build/
+*.o
+*.d
+*.lst
+*.map
+*.elf
+*.bin
+*.hex
+*.s19
+*.su
+*.cyclo
+
+# === CubeMX 临时文件 ===
+*.tmp
+*.bak
+*~
+.metadata/
+
+# === OS 垃圾文件 ===
+Thumbs.db
+.DS_Store
+
+# ============================================================
+# 以下必须提交 (不要 ignore):
+#   .cproject   编译选项 / include 路径
+#   .project    工程描述
+#   .mxproject  CubeMX 关联
+#   .settings/  MCU 型号 / 调试器配置
+#   *.ioc       CubeMX 引脚配置
+#   *.launch    调试配置 (建议保留, 方便团队)
+# ============================================================
