@@ -23,6 +23,9 @@ void BSP_Init(void)
 
     // UART5_Init();   // 先注释掉，ESP32 调试阶段不要让 UART5 参与 Deal_Bluetooth
 
+    /* CubeMX 未启用 USART1 NVIC, 必须手动开启 (RX 中断和 DMA TC 中断都需要) */
+    NVIC_SetPriority(USART1_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0));
+    NVIC_EnableIRQ(USART1_IRQn);
     USART1_Receive_IT_Start();
 
     /*
@@ -46,7 +49,7 @@ void BSP_Loop(void)
      * 第一优先级：先处理 ESP32 / USART1 发来的完整控制帧。
      * 当前调试阶段先保证小车能响应指令。
      */
-    USE_Bluetooth_Control();
+	// USE_Bluetooth_Control();
 
     /*
      * IMU 数据处理: 解析 UART4 环形缓冲区中的 YB-IMU 帧，更新传感器缓存。
@@ -73,22 +76,26 @@ void BSP_Loop(void)
 #endif
 
     /*
-     * 每 100ms 向 ESP32 上报一次 IMU 欧拉角数据。
-     * ESP32 端通过 "$IMU" 前缀区分 IMU 帧 vs EXEC 回执。
+     * 每 50ms 向 ESP32 上报 IMU 数据: 欧拉角(°)+角速度(rad/s)+加速度(g)
+     * 欧拉角用于姿态参考, 角速度是运动控制核心(Yaw不漂移), 加速度用于倾斜补偿.
+     * ESP32 端通过 "$IMU" 前缀区分 IMU 帧 vs EXEC 回执.
+     * todo: 改成DMA非阻塞发送
      */
     {
         static uint32_t last_imu_rpt = 0;
         uint32_t now = HAL_GetTick();
-        if (now - last_imu_rpt > 100) {
+        if (now - last_imu_rpt > 1000) {
             last_imu_rpt = now;
 
             imu_measurement_t imu;
             IMU_UART_GetAll(&imu);
 
-            char imu_buf[128];
+            static char imu_buf[200];  /* static: DMA 异步发送期间数据须保持有效 */
             int len = sprintf(imu_buf,
-                "$IMU,EULER,%.2f,%.2f,%.2f#\r\n",
-                imu.euler[0], imu.euler[1], imu.euler[2]);
+                "$IMU,EULER,%.2f,%.2f,%.2f,GYRO,%.3f,%.3f,%.3f,ACCEL,%.3f,%.3f,%.3f#\r\n",
+                imu.euler[0], imu.euler[1], imu.euler[2],
+                imu.gyro[0],  imu.gyro[1],  imu.gyro[2],
+                imu.accel[0], imu.accel[1], imu.accel[2]);
             USART1_Send((uint8_t *)imu_buf, (uint16_t)len);
         }
     }

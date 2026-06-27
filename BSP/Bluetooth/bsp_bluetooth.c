@@ -40,7 +40,7 @@ static uint8_t  g_timeout_stop_done = 0;
 static void USART1_Send_EXEC_From_Protocol(void)
 {
 	char exec_cmd = 'S';
-	char exec_buf[16];
+	static char exec_buf[16]; /* DMA safe */
 	int len;
 
 	if (ProtocolString[3] == '1')
