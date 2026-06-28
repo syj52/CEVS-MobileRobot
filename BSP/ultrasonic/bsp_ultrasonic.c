@@ -22,23 +22,30 @@ float Get_distance(void)
 		Delay_US(20);
 		HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin,GPIO_PIN_RESET);
 
-
-		while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_RESET);
-
+		/* 启动 TIM7 计数, 等待 ECHO 上升沿, 带超时保护 */
+		ultrasonic_num = 0;
 		ultrasonic_flag = 1;
+		while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_RESET)
+		{
+			if(ultrasonic_num >= 10000)
+			{
+				ultrasonic_flag = 0;
+				ultrasonic_num = 0;
+				return 0;
+			}
+		}
 
 		i+=1;
 		while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_SET)
-	{
-			count = ultrasonic_num;
-		if(count >= 10000)
 		{
-			ultrasonic_flag = 0;
-			ultrasonic_num = 0;
-			return 0;
+			count = ultrasonic_num;
+			if(count >= 10000)
+			{
+				ultrasonic_flag = 0;
+				ultrasonic_num = 0;
+				return 0;
+			}
 		}
-
-	}
 
 		ultrasonic_flag = 0;
 		tim = TIM7->CNT;
@@ -46,7 +53,6 @@ float Get_distance(void)
 		aveg = distance + aveg;
 		ultrasonic_num = 0;
 		HAL_Delay(10);
-
 	}
 	distance = aveg / 5;
 	return distance;

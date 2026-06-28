@@ -55,3 +55,13 @@ void Get_Iravoid_Data(uint16_t *left_data,uint16_t *right_data)
 	printf("L1:%d     R1:%d \r\n",*left_data,*right_data);
 
 }
+
+/*
+ * Printf-free version: reads IR ADC values without USART1 contention.
+ * Used by SNSR frame reporting — printf would conflict with USART1 DMA TX.
+ */
+void Get_Iravoid_Data_NoPrintf(uint16_t *left_data, uint16_t *right_data)
+{
+	*left_data =  Adc_Get_Iravoid(IR_Left_CH);
+	*right_data = Adc_Get_Iravoid(IR_Right_CH);
+}
