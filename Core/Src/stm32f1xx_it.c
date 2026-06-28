@@ -24,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "IMU/imu_uart_driver.h"
+#include "usart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,6 +60,7 @@
 /* External variables --------------------------------------------------------*/
 extern TIM_HandleTypeDef htim6;
 extern TIM_HandleTypeDef htim7;
+extern DMA_HandleTypeDef hdma_usart1_tx;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -202,14 +204,28 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles DMA1 channel4 global interrupt.
+  */
+void DMA1_Channel4_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Channel4_IRQn 0 */
+
+  /* USER CODE END DMA1_Channel4_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_usart1_tx);
+  /* USER CODE BEGIN DMA1_Channel4_IRQn 1 */
+
+  /* USER CODE END DMA1_Channel4_IRQn 1 */
+}
+
+/**
   * @brief This function handles UART4 global interrupt.
   */
 void UART4_IRQHandler(void)
 {
   /* USER CODE BEGIN UART4_IRQn 0 */
   /*
-   * STM32F1: RXNEIE 同时使能 RXNE 和 ORE 中断。ORE (溢出) 发生时 RXNE
-   * 不置位, 必须读 DR 清 ORE, 否则 ISR 死循环导致主循环卡死。
+   * STM32F1: RXNEIE 同时使能 RXNE �?? ORE 中断。ORE (溢出) 发生�?? RXNE
+   * 不置�??, 必须�?? DR �?? ORE, 否则 ISR 死循环导致主循环卡死�??
    */
   if (LL_USART_IsActiveFlag_RXNE(UART4))
   {
@@ -217,7 +233,7 @@ void UART4_IRQHandler(void)
   }
   else
   {
-      LL_USART_ReceiveData8(UART4);  /* 清 ORE 等错误标志 */
+      LL_USART_ReceiveData8(UART4);  /* �?? ORE 等错误标�?? */
   }
   /* USER CODE END UART4_IRQn 0 */
   /* USER CODE BEGIN UART4_IRQn 1 */
@@ -228,7 +244,7 @@ void UART4_IRQHandler(void)
 /**
   * @brief This function handles UART5 global interrupt.
   */
-__weak void UART5_IRQHandler(void)
+void UART5_IRQHandler(void)
 {
   /* USER CODE BEGIN UART5_IRQn 0 */
 
@@ -267,5 +283,12 @@ void TIM7_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
+/*
+ * USART1_IRQHandler: CubeMX 未生成此 handler (NVIC 未勾选 USART1 全局中断),
+ * 但 HAL_UART_Receive_IT 和 DMA TC 都需要它。弱链接指向 Default_Handler(死循环)。
+ */
+void USART1_IRQHandler(void)
+{
+  HAL_UART_IRQHandler(&huart1);
+}
 /* USER CODE END 1 */

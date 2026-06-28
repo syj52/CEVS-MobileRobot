@@ -172,7 +172,7 @@ void IMU_UART_Process(void)
             break;
 
         case ST_COLLECT_DATA: {
-            uint16_t data_len = (frame_len >= 5) ? (uint16_t)(frame_len - 5) : 0;
+            uint16_t data_len = (frame_len >= 4) ? (uint16_t)(frame_len - 4) : 0;
             if (data_len == 0 || data_len > sizeof(frame_buf)) {
                 state = ST_EXPECT_HEAD1;
                 break;

@@ -20,6 +20,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "dma.h"
 #include "i2c.h"
 #include "tim.h"
 #include "usart.h"
@@ -70,13 +71,13 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
   /*
-   * 上电第一件事: 把 PC10 (UART4_TX, 连接 IMU RX) 拉高。
-   * 如果 PC10 浮空为 LOW, IMU 的 RX 引脚会收到持续低电平,
-   * 导致 IMU 进入 bootloader 模式而非正常运行 (LED 不闪, 不发送数据)。
-   * 必须先开 GPIOC 时钟, 配为推挽输出, 写 BSRR 置高。
+   * 上电第一件事: �? PC10 (UART4_TX, 连接 IMU RX) 拉高�?
+   * 如果 PC10 浮空�? LOW, IMU �? RX 引脚会收到持续低电平,
+   * 导致 IMU 进入 bootloader 模式而非正常运行 (LED 不闪, 不发送数�?)�?
+   * 必须先开 GPIOC 时钟, 配为推挽输出, �? BSRR 置高�?
    */
   RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
-  GPIOC->CRH &= ~(0xF << 8);        /* 清 PC10 配置位 */
+  GPIOC->CRH &= ~(0xF << 8);        /* �? PC10 配置�? */
   GPIOC->CRH |=  (0x3 << 8);        /* PC10 = 50MHz 推挽输出 */
   GPIOC->BSRR  =  (1U << 10);       /* 置高 PC10 */
   /* USER CODE END 1 */
@@ -99,6 +100,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();

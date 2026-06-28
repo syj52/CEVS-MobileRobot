@@ -16,6 +16,8 @@ volatile uint32_t g_usart1_err_count = 0;
 
 PUTCHAR_PROTOTYPE
 {
+  /* 等 UART TX 空闲再发 printf 字符, 避免争抢 */
+  while (huart1.gState != HAL_UART_STATE_READY) { }
   HAL_UART_Transmit(&USART_DEBUG, (uint8_t *)&ch, 1, 0xFFFF);
   return ch;
 }
@@ -28,10 +30,13 @@ void USART1_Receive_IT_Start(void)
   HAL_UART_Receive_IT(&huart1, &usart1_rx_byte, 1);
 }
 
-/* Send bytes through USART1. Used to return EXEC information to ESP32. */
+/* Send bytes through USART1 via DMA. Non-blocking — returns immediately.
+ * Caller must ensure data buffer stays valid until transfer completes. */
 void USART1_Send(uint8_t *data_str, uint16_t datasize)
 {
-  HAL_UART_Transmit(&huart1, data_str, datasize, 0xFFFF);
+  /* 等 UART HAL 状态机复位 (DMA TC 中断 → TxCpltCallback → gState=READY) */
+  while (huart1.gState != HAL_UART_STATE_READY) { }
+  HAL_UART_Transmit_DMA(&huart1, data_str, datasize);
 }
 
 /* USART1 receives bytes from ESP32 and passes them to the original Bluetooth
