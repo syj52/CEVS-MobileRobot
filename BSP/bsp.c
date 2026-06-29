@@ -130,7 +130,7 @@ void BSP_Loop(void)
                 g_Encoder_All_Now[1],
                 g_Encoder_All_Now[2],
                 g_Encoder_All_Now[3]);
-            USART1_Send((uint8_t *)odom_buf, (uint16_t)len);
+            //USART1_Send((uint8_t *)odom_buf, (uint16_t)len);
         }
     }
 
@@ -150,10 +150,11 @@ void BSP_Loop(void)
             uint16_t ir_right = 0;
             Get_Iravoid_Data_NoPrintf(&ir_left, &ir_right);
 
-            static char snsr_buf[80];   /* static: DMA 异步发送期间数据须保持有效 */
+            static char snsr_buf[96];   /* static: DMA 异步发送期间数据须保持有效 */
             int len = sprintf(snsr_buf,
-                "$SNSR,US=%.1f,IRL=%u,IRR=%u,X=%d,%d,%d,%d,BAT=%.2f#\r\n",
+                "$SNSR,US=%.1f,TO=%u,IRL=%u,IRR=%u,X=%d,%d,%d,%d,BAT=%.2f#\r\n",
                 Get_distance(),
+                (unsigned int)g_us_timeout_reason,
                 (unsigned int)ir_left,
                 (unsigned int)ir_right,
                 (int)IN_X1,
@@ -161,7 +162,7 @@ void BSP_Loop(void)
                 (int)IN_X3,
                 (int)IN_X4,
                 (double)Adc_Get_Battery_Volotage());
-            //USART1_Send((uint8_t *)snsr_buf, (uint16_t)len);
+            USART1_Send((uint8_t *)snsr_buf, (uint16_t)len);
         }
     }
 
