@@ -26,7 +26,7 @@ float Get_distance(void)
 		tries++;
 
 		HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin,GPIO_PIN_SET);
-		Delay_US(10); /* 必须是 10us, 20us 会导致 Yahboom 模块不响应 */
+		Delay_US(20); /* 必须是 10us, 20us 会导致 Yahboom 模块不响应 */
 		HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin,GPIO_PIN_RESET);
 
 		/* 启动 TIM7 计数, 等待 ECHO 上升沿, 带超时保护 */
@@ -40,6 +40,9 @@ float Get_distance(void)
 				goto skip_sample;
 			}
 		}
+
+		/* ECHO 上升沿: 清零计数器, 只测回波脉冲宽度, 不包含模块预处理时间 */
+		ultrasonic_num = 0;
 
 		/* 等待 ECHO 下降沿 */
 		while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_SET)
