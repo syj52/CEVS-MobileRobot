@@ -41,6 +41,11 @@ void BSP_Init(void)
 
 extern int send_time;//引入中断标志 Introducing interrupt flags
 
+/* ODOM/SNSR data sources — computed in Motion_Handle() every 10ms (TIM6 ISR) */
+extern car_data_t   car_data;
+extern motor_data_t motor_data;
+extern int          g_Encoder_All_Now[MAX_MOTOR];
+
 //Loop Run Function
 //Parameter:None
 void BSP_Loop(void)
@@ -84,7 +89,7 @@ void BSP_Loop(void)
     {
         static uint32_t last_imu_rpt = 0;
         uint32_t now = HAL_GetTick();
-        if (now - last_imu_rpt > 1000) {
+        if (now - last_imu_rpt > 200) {
             last_imu_rpt = now;
 
             imu_measurement_t imu;
@@ -96,7 +101,67 @@ void BSP_Loop(void)
                 imu.euler[0], imu.euler[1], imu.euler[2],
                 imu.gyro[0],  imu.gyro[1],  imu.gyro[2],
                 imu.accel[0], imu.accel[1], imu.accel[2]);
-            USART1_Send((uint8_t *)imu_buf, (uint16_t)len);
+            //USART1_Send((uint8_t *)imu_buf, (uint16_t)len);
+        }
+    }
+
+    /*
+     * 每 200ms 向 ESP32 上报 ODOM (里程计) 数据帧。
+     * Vx: 前后速度 (mm/s), Vz: 角速度, S1..S4: 四轮实测速度 (mm/s),
+     * ENC: 四轮累计编码器脉冲 (开机至今, 32-bit 不溢出).
+     * 所有数据在 TIM6 ISR (10ms) 中更新, 读取时始终一致.
+     */
+    {
+        static uint32_t last_odom_rpt = 0;
+        uint32_t now = HAL_GetTick();
+        if (now - last_odom_rpt > 200) {
+            last_odom_rpt = now;
+
+            static char odom_buf[128];  /* static: DMA 异步发送期间数据须保持有效 */
+            int len = sprintf(odom_buf,
+                "$ODOM,Vx=%d,Vz=%d,S1=%d,S2=%d,S3=%d,S4=%d,ENC=%d,%d,%d,%d#\r\n",
+                (int)car_data.Vx,
+                (int)car_data.Vz,
+                (int)motor_data.speed_mm_s[0],
+                (int)motor_data.speed_mm_s[1],
+                (int)motor_data.speed_mm_s[2],
+                (int)motor_data.speed_mm_s[3],
+                g_Encoder_All_Now[0],
+                g_Encoder_All_Now[1],
+                g_Encoder_All_Now[2],
+                g_Encoder_All_Now[3]);
+            USART1_Send((uint8_t *)odom_buf, (uint16_t)len);
+        }
+    }
+
+    /*
+     * 每 500ms 向 ESP32 上报 SNSR (环境传感器) 数据帧。
+     * US: 超声波距离 (cm), IRL/IRR: 左右红外避障 ADC 值,
+     * X1..X4: 巡线传感器 GPIO 电平 (0=黑线/1=白), BAT: 电池电压 (V).
+     * 注意: Get_distance() 内部 while 等待 ECHO 回波, 阻塞约 50-100ms.
+     */
+    {
+        static uint32_t last_snsr_rpt = 0;
+        uint32_t now = HAL_GetTick();
+        if (now - last_snsr_rpt > 500) {
+            last_snsr_rpt = now;
+
+            uint16_t ir_left  = 0;
+            uint16_t ir_right = 0;
+            Get_Iravoid_Data_NoPrintf(&ir_left, &ir_right);
+
+            static char snsr_buf[80];   /* static: DMA 异步发送期间数据须保持有效 */
+            int len = sprintf(snsr_buf,
+                "$SNSR,US=%.1f,IRL=%u,IRR=%u,X=%d,%d,%d,%d,BAT=%.2f#\r\n",
+                Get_distance(),
+                (unsigned int)ir_left,
+                (unsigned int)ir_right,
+                (int)IN_X1,
+                (int)IN_X2,
+                (int)IN_X3,
+                (int)IN_X4,
+                (double)Adc_Get_Battery_Volotage());
+            //USART1_Send((uint8_t *)snsr_buf, (uint16_t)len);
         }
     }
 

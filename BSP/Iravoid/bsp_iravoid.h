@@ -12,5 +12,6 @@
 void IR_SWitch(uint8_t state);
 uint16_t Adc_Get_Iravoid(uint32_t ch);
 void Get_Iravoid_Data(uint16_t *left_data,uint16_t *right_data);
+void Get_Iravoid_Data_NoPrintf(uint16_t *left_data, uint16_t *right_data);
 
 #endif
