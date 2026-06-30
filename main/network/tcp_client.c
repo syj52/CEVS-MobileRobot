@@ -10,6 +10,7 @@
 
 #include "tcp_client.h"
 #include "nav/nav_grid.h"
+#include "motion.h"
 
 static const char *TAG = "tcp_client";
 
@@ -44,7 +45,6 @@ typedef enum {
 } esp_state_t;
 
 static esp_state_t s_esp_state = ESP_IDLE;
-static TaskHandle_t s_nav_timer_handle;
 
 static void tcp_client_task(void *arg);
 
@@ -106,22 +106,7 @@ static float kv_get_float(const char *buf, const char *key, float default_val)
     return (end == p) ? default_val : v;
 }
 
-/* ─── Navigation simulation task ──────────────────────────── */
-
-static void nav_sim_task(void *arg)
-{
-    (void)arg;
-    uint32_t delay_ms = 3000 + (esp_random() % 5000);
-    vTaskDelay(pdMS_TO_TICKS(delay_ms));
-
-    if (s_esp_state == ESP_MOVING) {
-        s_esp_state = ESP_IDLE;
-        send(s_sock, "EXEC:A\r\n", 8, 0);
-        ESP_LOGI(TAG, "Simulated arrival (waited %ums)", delay_ms);
-    }
-    s_nav_timer_handle = NULL;
-    vTaskDelete(NULL);
-}
+/* ─── Navigation — real motor control via UART STM32 ─────── */
 
 /* ─── MAP 行解析 ─────────────────────────────────────────────── */
 
@@ -200,6 +185,12 @@ static void dispatch_cmd(const char *line)
         return;
     }
 
+    /* Manual motor frame (from control.html /api/motor) — forward to UART */
+    if (line[0] == '$') {
+        motion_send_raw(line);
+        return;
+    }
+
     if (memcmp(line, "CMD:", 4) != 0) {
         send(s_sock, "ERR:EXPECTED_CMD\r\n", 19, 0);
         return;
@@ -221,32 +212,29 @@ static void dispatch_cmd(const char *line)
             return;
         }
 
-        /* 地图通行性检查（起点 = 当前 robot 位置，需要读取传感器，这里暂时用 (0,0) 或后续补充） */
+        /* 地图通行性检查 */
         if (!grid_is_passable(x, y)) {
             send(s_sock, "NAV:REJECT\r\n", 13, 0);
             ESP_LOGW(TAG, "NAV rejected: (%.2f, %.2f) blocked", x, y);
             return;
         }
 
-        /* cancel any pending simulation */
-        if (s_nav_timer_handle != NULL) {
-            vTaskDelete(s_nav_timer_handle);
-            s_nav_timer_handle = NULL;
-        }
-
         s_esp_state = ESP_MOVING;
         send(s_sock, "EXEC:S\r\n", 8, 0);
-        xTaskCreate(&nav_sim_task, "nav_sim", 2048, NULL,
-                    tskIDLE_PRIORITY + 2, &s_nav_timer_handle);
-        ESP_LOGI(TAG, "Nav started to (%.2f, %.2f)", x, y);
+
+        esp_err_t mr = motion_nav_to(x, y, 1.0f);
+        if (mr != ESP_OK) {
+            ESP_LOGE(TAG, "motion_nav_to failed: %s", esp_err_to_name(mr));
+            s_esp_state = ESP_IDLE;
+            send(s_sock, "EXEC:A\r\n", 8, 0);  /* abort path */
+        } else {
+            ESP_LOGI(TAG, "Nav started to (%.2f, %.2f) via UART STM32", x, y);
+        }
         return;
     }
 
     if (strcmp(cmd, "STOP") == 0) {
-        if (s_nav_timer_handle != NULL) {
-            vTaskDelete(s_nav_timer_handle);
-            s_nav_timer_handle = NULL;
-        }
+        motion_stop();
         s_esp_state = ESP_IDLE;
         send(s_sock, "EXEC:S\r\n", 8, 0);
         ESP_LOGI(TAG, "Nav stopped");
