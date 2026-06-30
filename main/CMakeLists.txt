@@ -4,8 +4,6 @@ idf_component_register(
          "rtsp_service.c"
          "streamer.c"
          "audio_mic.c"
-         "uart_stm32.c"
-         "motion.c"
          "network/wifi_manager.c"
          "network/tcp_client.c"
          "nav/nav_grid.c"

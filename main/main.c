@@ -15,8 +15,6 @@
 #include "audio_mic.h"
 #include "video_dev.h"
 #include "rtsp_service.h"
-#include "uart_stm32.h"
-#include "motion.h"
 
 static const char *TAG = "MAIN";
 static camera_context s_cam_ctx;
@@ -57,6 +55,7 @@ void app_main(void) {
     if (r != ESP_OK) ESP_LOGW(TAG, "Mic init failed (non-fatal)");
     else ESP_LOGI(TAG, "Mic ready -> http://<ip>/mic.wav");
 
+<<<<<<< HEAD
     /* UART STM32 (motor controller via GPIO5/6) */
     r = uart_stm32_init(NULL);
     if (r != ESP_OK) ESP_LOGE(TAG, "STM32 UART init failed");
@@ -67,5 +66,7 @@ void app_main(void) {
     if (r != ESP_OK) ESP_LOGE(TAG, "Motion init failed");
     else ESP_LOGI(TAG, "Motion controller ready");
 
+=======
+>>>>>>> 5d932e40df88413790b7b470cfb46beb1ea52a80
     while (1) { vTaskDelay(1000); }
 }
