@@ -1,0 +1,10 @@
+build/
+sdkconfig
+*.elf
+*.bin
+*.map
+managed_components/
+node_modules/
+center_real/
+.DS_Store
+Thumbs.db
