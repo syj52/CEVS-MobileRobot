@@ -1,0 +1,73 @@
+menu "Robot Gateway WiFi"
+
+    config ESP_WIFI_SSID
+        string "WiFi SSID"
+        default "bbz"
+
+    config ESP_WIFI_PASSWORD
+        string "WiFi password"
+        default "987654321"
+        help
+            Password for the target WiFi network.
+
+    config ESP_WIFI_STA_MAX_RETRY
+        int "Max WiFi reconnection retries"
+        default 10
+
+    config ESP_WIFI_STA_RECONNECT_DELAY_MS
+        int "WiFi reconnection delay (ms)"
+        default 5000
+
+endmenu
+
+menu "Robot Gateway TCP"
+
+    config PC_SERVER_IP
+        string "PC server IP address"
+        default "192.168.198.83"
+        help
+            IP address of the PC that runs the TCP server.
+            The ESP32-P4 will act as a TCP client and connect to this address.
+
+    config PC_SERVER_PORT
+        int "PC server TCP port"
+        default 5000
+        range 1 65535
+        help
+            TCP port of the PC server.
+
+endmenu
+
+menu "Voice Activity Detection (VAD)"
+
+    config VAD_RMS_THRESHOLD
+        int "Voice RMS threshold (100-20000)"
+        default 1500
+        range 100 20000
+        help
+            RMS threshold for voice detection on 16-bit PCM.
+            Lower = more sensitive (triggers on quieter sounds / noise).
+            Higher = less sensitive (only loud/close speech).
+
+            Recommended:
+              800      : sensitive, may trigger on ambient noise
+              1500     : normal speech at ~0.3m (default, noise-resistant)
+              2500+    : loud/close-mic only
+
+    config VAD_SILENCE_BLOCKS
+        int "Silence blocks before utterance ends"
+        default 5
+        range 3 20
+        help
+            Consecutive silent 200ms blocks before utterance ends.
+            5 blocks = 1.0s silence (default). 3 blocks = 0.6s.
+
+    config VOICE_MAX_BLOCKS
+        int "Max utterance length in blocks (200ms each)"
+        default 15
+        range 5 60
+        help
+            Max recording length. 15 blocks = 3 seconds (default).
+            Shorter = smaller TCP payload = less video disruption.
+
+endmenu
