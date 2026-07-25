@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.glb
+*.pgm
+*.csv
+*.log
+captures/
+qrcodes/
+data/
+maps/uploaded_map.*
+maps/export.glb
+error.txt
+.DS_Store
+Thumbs.db
+.gitignore_temp
