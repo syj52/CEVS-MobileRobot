@@ -166,7 +166,16 @@ void app_main(void) {
     /* Speaker (MAX98357 via I2S DOUT=GPIO9) */
     r = audio_spk_init();
     if (r != ESP_OK) ESP_LOGW(TAG, "Speaker init failed (non-fatal)");
-    else ESP_LOGI(TAG, "Speaker ready");
+    else {
+        ESP_LOGI(TAG, "Speaker ready");
+        /* ███████████████████████████████████████████████████████████████
+           诊断：取消注释下一行，上电后 2s 播放 1kHz 正弦波 300ms。
+           干净的正弦声 → I2S 配置正确，问题在 TCP→ESP32 数据路径。
+           还是噼啪杂音   → I2S 时钟/格式配置有问题。
+           振幅 10000 ≈ 30% 满幅，足够听清。调振幅不解决问题。
+           ███████████████████████████████████████████████████████████████ */
+        // audio_spk_play_tone(1000, 300, 10000); /* 诊断：I2S 配置已验证干净 */
+    }
 
     /* UART STM32 */
     r = uart_stm32_init(on_stm32_rx);
