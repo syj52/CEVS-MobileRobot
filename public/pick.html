@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>智能取货</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg, #0f1419 0%, #1a2332 100%);
+    color: #e8edf4; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 24px 16px;
+  }
+  .card {
+    background: #1a2332; border: 1px solid #2a3a50; border-radius: 16px;
+    width: 100%; max-width: 420px; padding: 28px 24px; margin-top: 8vh;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #7a8ba0; margin-bottom: 24px; }
+  .goods-icon { font-size: 56px; text-align: center; margin: 12px 0 20px; }
+  .goods-name { font-size: 26px; font-weight: 700; text-align: center; margin-bottom: 8px; }
+  .goods-meta { text-align: center; color: #7a8ba0; font-size: 14px; margin-bottom: 28px; line-height: 1.8; }
+  .goods-meta .chip {
+    display: inline-block; background: #0f1419; border: 1px solid #2a3a50;
+    border-radius: 6px; padding: 3px 12px; margin: 0 4px; color: #22c55e;
+  }
+  button {
+    width: 100%; padding: 16px; border: none; border-radius: 12px;
+    font-size: 18px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    font-family: inherit;
+  }
+  .btn-primary { background: #22c55e; color: #062812; }
+  .btn-primary:active { background: #16a34a; transform: scale(0.98); }
+  .btn-primary:disabled { background: #2a3a50; color: #7a8ba0; }
+  .btn-cancel { background: transparent; color: #7a8ba0; margin-top: 12px; padding: 12px; }
+  .status {
+    margin-top: 20px; padding: 16px; border-radius: 12px; text-align: center;
+    font-size: 15px; line-height: 1.6; display: none;
+  }
+  .status.show { display: block; }
+  .status.nav { background: rgba(59,130,246,0.15); border: 1px solid #3b82f6; color: #93c5fd; }
+  .status.arrived { background: rgba(34,197,94,0.15); border: 1px solid #22c55e; color: #86efac; }
+  .status.done { background: rgba(34,197,94,0.25); border: 1px solid #22c55e; color: #86efac; }
+  .status.error { background: rgba(239,68,68,0.15); border: 1px solid #ef4444; color: #fca5a5; }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px; margin-right: 8px;
+    border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+    border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .err-box { text-align: center; color: #fca5a5; padding: 40px 0; font-size: 16px; }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="title">🏭 智能仓库取货</div>
+    <div class="subtitle">扫码确认 · 小车自动配送</div>
+    <div id="content">
+      <div class="err-box">加载中...</div>
+    </div>
+  </div>
+
+<script>
+const API = location.origin + '/api';
+const params = new URLSearchParams(location.search);
+const goodsId = params.get('goods');
+let statusTimer = null;
+
+async function loadGoods() {
+  const content = document.getElementById('content');
+  if (!goodsId) {
+    content.innerHTML = '<div class="err-box">❌ 二维码无效<br>缺少货物信息</div>';
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/goods/${goodsId}`);
+    if (!r.ok) {
+      content.innerHTML = '<div class="err-box">❌ 货物不存在<br>ID: ' + goodsId + '</div>';
+      return;
+    }
+    const g = await r.json();
+    content.innerHTML = `
+      <div class="goods-icon">📦</div>
+      <div class="goods-name">${g.name}</div>
+      <div class="goods-meta">
+        <span class="chip">货架 ${g.shelf || '—'}</span>
+        <span class="chip">位置 (${g.x}, ${g.y})</span>
+      </div>
+      <button class="btn-primary" id="pick-btn" onclick="doPick()">确认取货 · 派车</button>
+      <div class="status" id="status"></div>
+    `;
+  } catch (e) {
+    content.innerHTML = '<div class="err-box">❌ 无法连接服务器<br>请检查网络</div>';
+  }
+}
+
+async function doPick() {
+  const btn = document.getElementById('pick-btn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  btn.textContent = '派车中...';
+
+  try {
+    const r = await fetch(`${API}/goods/pick`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goodsId }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      status.className = 'status show error';
+      status.innerHTML = '⚠️ ' + (data.error || '派车失败');
+      btn.disabled = false;
+      btn.textContent = '重试';
+      return;
+    }
+    // 开始轮询状态
+    pollStatus();
+  } catch (e) {
+    status.className = 'status show error';
+    status.innerHTML = '⚠️ 请求失败';
+    btn.disabled = false;
+    btn.textContent = '重试';
+  }
+}
+
+async function pollStatus() {
+  const status = document.getElementById('status');
+  const btn = document.getElementById('pick-btn');
+  try {
+    const r = await fetch(`${API}/goods/status`);
+    const s = await r.json();
+
+    if (s.status === 'navigating') {
+      status.className = 'status show nav';
+      status.innerHTML = '<span class="spinner"></span>' + (s.message || '小车导航中...');
+      btn.textContent = '配送中';
+    } else if (s.status === 'arrived') {
+      status.className = 'status show arrived';
+      status.innerHTML = '🎯 ' + (s.message || '小车已到达货位');
+    } else if (s.status === 'dropping') {
+      status.className = 'status show arrived';
+      status.innerHTML = '<span class="spinner"></span>📦 正在投放货物...';
+    } else if (s.status === 'done') {
+      status.className = 'status show done';
+      status.innerHTML = '✅ ' + (s.message || '取货完成！货物已送达');
+      btn.textContent = '完成';
+      if (statusTimer) clearTimeout(statusTimer);
+      return;
+    } else if (s.status === 'error') {
+      status.className = 'status show error';
+      status.innerHTML = '⚠️ ' + (s.message || '出错了');
+      btn.disabled = false;
+      btn.textContent = '重试';
+      if (statusTimer) clearTimeout(statusTimer);
+      return;
+    }
+  } catch (e) { /* retry */ }
+  statusTimer = setTimeout(pollStatus, 1000);
+}
+
+loadGoods();
+</script>
+</body>
+</html>

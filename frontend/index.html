@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CEVS 数字孪生</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 左上：Tab 切换 -->
+  <div id="tabs">
+    <button class="tab active" data-tab="map">🗺️ 导航地图</button>
+    <button class="tab" data-tab="3d">3D 场景</button>
+    <button class="tab" data-tab="control">手动控制</button>
+    <button class="tab" data-tab="calib">🔧 校准</button>
+    <button class="tab" data-tab="goods">📦 货物</button>
+    <button class="tab" data-tab="video">📹 视频</button>
+    <button class="tab" data-tab="dash">仪表盘</button>
+    <button class="tab" data-tab="poi">POI</button>
+    <button class="tab" data-tab="logs">日志</button>
+  </div>
+
+  <!-- 状态栏 -->
+  <div id="status-bar">
+    <span id="status-esp" class="badge off">ESP 未连接</span>
+    <span id="status-robot">位置: (0, 0)</span>
+    <span id="status-mode">状态: idle</span>
+    <span id="status-battery">🔋 100%</span>
+    <span id="status-calib" class="badge" style="display:none">校准中</span>
+  </div>
+
+  <!-- 3D 场景 -->
+  <div id="panel-3d" class="panel">
+    <div id="three-container"></div>
+    <div style="position:absolute;top:50px;right:14px;z-index:10">
+      <label style="color:#7a8ba0;font-size:12px;cursor:pointer;user-select:none">
+        <input type="checkbox" id="t-slice-toggle"> 🗂️ 截面
+      </label>
+    </div>
+    <div id="slice-panel" style="display:none;position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:#1a2332;border:1px solid #2a3a50;border-radius:8px;padding:12px 20px;color:#e8edf4;font-size:13px;z-index:10">
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <label>高度 <input id="slice-y" type="range" step="0.05" min="-1" max="3" value="0.15" style="width:120px">
+        <span id="slice-y-val">0.15</span>m</label>
+        <label>厚度 <input id="slice-t" type="range" step="0.05" min="0.01" max="1" value="0.20" style="width:120px">
+        <span id="slice-t-val">0.20</span>m</label>
+        <label>分辨率 <input id="slice-res" type="number" step="0.005" value="0.01" style="width:55px;background:#0f1419;border:1px solid #2a3a50;color:#e8edf4;padding:2px 6px;border-radius:3px"></label>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <button id="tc-translate" class="btn-sm" style="background:#2563eb">↕ 平移</button>
+        <button id="tc-rotate" class="btn-sm">↻ 旋转</button>
+        <button id="tc-scale" class="btn-sm">⇔ 缩放</button>
+        <button id="tc-reset" class="btn-sm">重置</button>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:11px;color:#7a8ba0">
+        <label>X: <input id="model-px" type="number" step="0.1" value="0" style="width:60px;background:#0f1419;border:1px solid #2a3a50;color:#e8edf4;padding:2px 6px;border-radius:3px"></label>
+        <label>Z: <input id="model-pz" type="number" step="0.1" value="0" style="width:60px;background:#0f1419;border:1px solid #2a3a50;color:#e8edf4;padding:2px 6px;border-radius:3px"></label>
+        <label>缩放: <input id="model-scale" type="number" step="0.01" value="1.0" style="width:60px;background:#0f1419;border:1px solid #2a3a50;color:#e8edf4;padding:2px 6px;border-radius:3px"></label>
+        <span>范围: <span id="model-bounds-info">--</span></span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+        <button id="slice-gen" style="padding:4px 16px">生成地图</button>
+        <span id="slice-status" style="color:#7a8ba0;font-size:11px"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 🗺️ 导航地图（含相机配置 + 调试信息） -->
+  <div id="panel-map" class="panel active">
+    <div id="map-layout">
+      <!-- 左侧：地图 -->
+      <div id="map-main">
+        <canvas id="map-canvas"></canvas>
+        <div id="map-info">点击地图设置导航目标</div>
+        <div id="map-legend">
+          <div>🔵 机器人 &nbsp; 🟩 天花板标签 &nbsp; 🟡 目标点</div>
+        </div>
+      </div>
+
+      <!-- 右侧：相机配置 + 调试信息 -->
+      <div id="map-sidebar">
+        <!-- 🗺️ 地图导入 -->
+        <div class="sidebar-section">
+          <h4 class="sidebar-title">🗺️ 地图</h4>
+          <div style="font-size:11px;color:#7a8ba0;margin-bottom:4px">导入二值图作为障碍物地图</div>
+          <input id="map-import-file" type="file" accept="image/*" style="display:none">
+          <div class="ctrl-row-compact">
+            <button id="map-import-btn" class="btn-sm">📂 选择图片</button>
+            <button id="map-clear-btn" class="btn-sm">🧹 清除</button>
+          </div>
+          <div class="form-grid-compact" style="margin-top:4px">
+            <label>宽度(m): <input id="map-scale-w" type="number" step="0.1" value="4.0"></label>
+            <label>高度(m): <input id="map-scale-h" type="number" step="0.1" value="4.0"></label>
+            <label>原点X: <input id="map-origin-x" type="number" step="0.1" value="-2.0"></label>
+            <label>原点Y: <input id="map-origin-y" type="number" step="0.1" value="-2.0"></label>
+          </div>
+          <div class="ctrl-row-compact">
+            <button id="map-apply-btn" class="btn-sm primary">✅ 应用</button>
+          </div>
+          <div id="map-import-status" class="status-text"></div>
+        </div>
+
+        <hr class="sidebar-divider">
+
+        <!-- 🏷️ 标签管理 -->
+        <div class="sidebar-section">
+          <h4 class="sidebar-title">🏷️ 天花板标签 <button id="tags-refresh" class="btn-sm" style="float:right">🔄</button></h4>
+          <div id="tags-list" class="tags-chips"></div>
+          <div class="form-grid-compact" style="margin-top:6px">
+            <label>ID: <input id="tag-id" type="number" min="0"></label>
+            <label>X: <input id="tag-x" type="number" step="0.1"></label>
+            <label>Y: <input id="tag-y" type="number" step="0.1"></label>
+            <label>Z(m): <input id="tag-z" type="number" step="0.1" value="2.8"></label>
+            <label>Yaw°: <input id="tag-yaw" type="number" step="1"></label>
+          </div>
+          <label style="font-size:11px;color:#7a8ba0">描述: <input id="tag-desc" style="width:100%;background:#1a2332;border:1px solid #2a3a50;color:#e8edf4;padding:3px 6px;border-radius:3px;font-size:12px;margin-top:3px"></label>
+          <div class="ctrl-row-compact">
+            <button id="tag-save" class="btn-sm primary">💾 保存</button>
+            <button id="tag-delete" class="btn-sm">🗑️ 删除</button>
+            <button id="tag-add" class="btn-sm">➕ 新建</button>
+          </div>
+          <div id="tags-status" class="status-text"></div>
+        </div>
+
+        <hr class="sidebar-divider">
+
+        <!-- 📷 相机配置 -->
+        <div class="sidebar-section">
+          <h4 class="sidebar-title">📷 相机参数</h4>
+          <div class="form-grid-compact">
+            <label>fx: <input id="cam-fx" type="number" step="1"></label>
+            <label>fy: <input id="cam-fy" type="number" step="1"></label>
+            <label>cx: <input id="cam-cx" type="number" step="1"></label>
+            <label>cy: <input id="cam-cy" type="number" step="1"></label>
+            <label>标签(m): <input id="cam-tag-size" type="number" step="0.001"></label>
+          </div>
+          <div class="ctrl-row-compact">
+            <button id="cam-load" class="btn-sm">📂 加载</button>
+            <button id="cam-save" class="btn-sm primary">💾 保存</button>
+            <button id="cam-reset" class="btn-sm">🔄 重置</button>
+          </div>
+          <div id="cam-status" class="status-text"></div>
+        </div>
+
+        <hr class="sidebar-divider">
+
+        <!-- 📍 位姿设置 -->
+        <div class="sidebar-section">
+          <h4 class="sidebar-title">📍 位姿设置</h4>
+          <div class="form-grid-compact">
+            <label>X: <input id="pose-x" type="number" step="0.1"></label>
+            <label>Y: <input id="pose-y" type="number" step="0.1"></label>
+            <label>角度°: <input id="pose-a" type="number" step="1"></label>
+          </div>
+          <div class="ctrl-row-compact">
+            <button id="pose-set" class="btn-sm primary">设置</button>
+            <button id="dbg-reset-pose" class="btn-sm">🎯 回原点</button>
+          </div>
+        </div>
+
+        <hr class="sidebar-divider">
+
+        <!-- 📈 调试信息 -->
+        <div class="sidebar-section">
+          <h4 class="sidebar-title">📈 实时调试</h4>
+          <div class="debug-row"><span>位置:</span><span id="dbg-pos">(--, --)</span></div>
+          <div class="debug-row"><span>角度:</span><span id="dbg-angle">--°</span></div>
+          <div class="debug-row"><span>左轮:</span><span id="dbg-left">-- mm</span></div>
+          <div class="debug-row"><span>右轮:</span><span id="dbg-right">-- mm</span></div>
+          <div class="debug-row"><span>航向Δ:</span><span id="dbg-dheading">--°</span></div>
+          <div class="debug-row"><span>编码器:</span><span id="dbg-enc-delta">--</span></div>
+          <div class="debug-row"><span>标签:</span><span id="dbg-tag-seen">--</span></div>
+          <div class="debug-row"><span>距上次:</span><span id="dbg-tag-time">-- ms</span></div>
+          <div class="debug-row"><span>轨迹点:</span><span id="dbg-trace-count">0</span></div>
+          <div class="debug-row"><span>最近运动:</span><span id="dbg-last-move">--</span></div>
+          <div class="ctrl-row-compact" style="margin-top:6px">
+            <button id="dbg-refresh" class="btn-sm">🔄 刷新</button>
+            <button id="dbg-trace-clear" class="btn-sm">清除轨迹</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 手动控制 -->
+  <div id="panel-control" class="panel">
+    <h3>🕹️ 手动控制</h3>
+    <div class="ctrl-grid">
+      <div></div><button class="ctrl-btn" data-dir="fwd">▲</button><div></div>
+      <button class="ctrl-btn" data-dir="left">◀</button>
+      <button class="ctrl-btn stop" data-dir="stop">■</button>
+      <button class="ctrl-btn" data-dir="right">▶</button>
+      <div></div><button class="ctrl-btn" data-dir="back">▼</button><div></div>
+    </div>
+    <div class="ctrl-row">
+      <label>速度: <span id="spd-val">5</span></label>
+      <input type="range" id="speed-slider" min="1" max="9" value="5">
+    </div>
+    <div class="ctrl-row">
+      <button class="ctrl-btn-sm" data-dir="spinL">↺ 原地左旋 (Q)</button>
+      <button class="ctrl-btn-sm" data-dir="spinR">↻ 原地右旋 (E)</button>
+    </div>
+    <div style="font-size:10px;color:#5a6a80;margin-top:4px;text-align:center">
+      WASD/方向键 = 弧线移动 | Q/E = 原地自转 | 空格 = 停止
+    </div>
+    <div class="ctrl-row">
+      <input id="raw-frame" value="$1,0,0,0,0,0,5,0,0,0#" style="width:200px">
+      <button id="send-raw">发送</button>
+    </div>
+    <div id="ctrl-status">就绪</div>
+
+    <hr style="border-color:#1a2332;margin:12px 0">
+
+    <!-- 紧急停止 + 取消导航 -->
+    <h4 class="section-title">🛑 紧急控制</h4>
+    <div class="ctrl-row" style="gap:8px">
+      <button id="btn-emergency-stop" class="btn-danger-big">🛑 紧急停止</button>
+      <button id="btn-cancel-nav" class="btn-sm">✖ 取消导航</button>
+    </div>
+
+    <hr style="border-color:#1a2332;margin:12px 0">
+
+    <!-- 坐标导航 -->
+    <h4 class="section-title">🧭 坐标导航</h4>
+    <div class="ctrl-row">
+      <input id="nav-x" type="number" step="0.1" placeholder="X" style="width:80px">
+      <input id="nav-y" type="number" step="0.1" placeholder="Y" style="width:80px">
+      <button id="btn-nav-direct" class="btn-sm primary">直接导航</button>
+    </div>
+    <div id="nav-plan-info" class="status-text">规划路径后点「执行路径」发送给机器人</div>
+
+    <hr style="border-color:#1a2332;margin:12px 0">
+
+    <!-- 巡逻模式 -->
+    <h4 class="section-title">🔄 巡逻模式</h4>
+    <div style="font-size:11px;color:#7a8ba0;margin-bottom:6px">输入巡逻点（每行 x,y），机器人将依次循环到访</div>
+    <textarea id="patrol-points" placeholder="0,0&#10;1,2&#10;-1,3" style="width:260px;height:70px;background:#1a2332;border:1px solid #2a3a50;color:#e8edf4;padding:4px;border-radius:4px;font-family:monospace;font-size:12px"></textarea>
+    <div class="ctrl-row" style="margin-top:6px;gap:8px">
+      <button id="btn-patrol-start" class="btn-sm primary">▶ 开始巡逻</button>
+      <button id="btn-patrol-arrive" class="btn-sm">到达下一点</button>
+    </div>
+    <div id="patrol-status" class="status-text"></div>
+
+    <hr style="border-color:#1a2332;margin:12px 0">
+
+    <div style="font-size:11px;color:#7a8ba0;margin-top:4px">位姿设置与调试信息已移至「导航地图」面板右侧</div>
+  </div>
+
+  <!-- 🔧 运动校准 -->
+  <div id="panel-calib" class="panel">
+    <h3>🔧 运动校准</h3>
+
+    <div style="background:#1a2332;padding:12px;border-radius:8px;margin-bottom:16px">
+      <div style="font-size:13px;color:#e8edf4;margin-bottom:8px">校准步骤：</div>
+      <ol style="font-size:12px;color:#7a8ba0;line-height:1.8;margin-left:20px">
+        <li>将机器人放在 AprilTag 可见位置</li>
+        <li>点击"开始旋转校准"或"开始前进校准"</li>
+        <li>机器人会自动运动 2 秒</li>
+        <li>等待标签重新检测，自动计算参数</li>
+      </ol>
+    </div>
+
+    <div class="ctrl-row" style="gap:12px">
+      <button id="calib-turn" style="background:#1e3a5f;padding:10px 20px">🔄 旋转校准</button>
+      <button id="calib-drive" style="background:#1e3a5f;padding:10px 20px">🚀 前进校准</button>
+      <button id="calib-cancel" style="background:#7f1d1d;padding:10px 20px">❌ 取消</button>
+    </div>
+
+    <div id="calib-status" style="margin:16px 0;padding:12px;background:#0a0e14;border-radius:8px;font-size:13px">
+      <div>状态: <span id="calib-phase" style="color:#7a8ba0">idle</span></div>
+      <div style="margin-top:8px;color:#7a8ba0" id="calib-message">点击按钮开始校准</div>
+    </div>
+
+    <hr style="border-color:#1a2332;margin:16px 0">
+
+    <h4 style="color:#7a8ba0;margin-bottom:12px">📊 校准结果</h4>
+    <div id="calib-results" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="calib-card">
+        <div style="font-size:12px;color:#7a8ba0">旋转速度</div>
+        <div id="calib-turn-speed" style="font-size:20px;color:#22c55e">-- °/s</div>
+        <div style="font-size:11px;color:#7a8ba0">ms/°: <span id="calib-turn-ms">--</span></div>
+        <div style="font-size:11px;color:#7a8ba0">已校准: <span id="calib-turn-count">0</span> 次</div>
+      </div>
+      <div class="calib-card">
+        <div style="font-size:12px;color:#7a8ba0">前进速度</div>
+        <div id="calib-drive-speed" style="font-size:20px;color:#22c55e">-- mm/s</div>
+        <div style="font-size:11px;color:#7a8ba0">ms/mm: <span id="calib-drive-ms">--</span></div>
+        <div style="font-size:11px;color:#7a8ba0">已校准: <span id="calib-drive-count">0</span> 次</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 📦 货物管理 -->
+  <div id="panel-goods" class="panel">
+    <h3>📦 货物取货管理</h3>
+
+    <div style="margin-bottom:12px">
+      <button id="goods-refresh">🔄 刷新</button>
+      <button id="goods-add">➕ 添加货物</button>
+    </div>
+
+    <div id="goods-list" style="flex:1;overflow-y:auto"></div>
+
+    <hr style="border-color:#1a2332;margin:12px 0">
+
+    <div id="goods-order-status" style="padding:12px;background:#1a2332;border-radius:8px;margin-bottom:12px">
+      <div style="font-size:12px;color:#7a8ba0">当前订单状态</div>
+      <div id="goods-order-detail" style="font-size:14px;margin-top:4px">空闲</div>
+    </div>
+
+    <h4 style="color:#7a8ba0;margin-bottom:8px">添加/编辑货物</h4>
+    <div class="form-grid">
+      <label>ID: <input id="goods-id" style="width:60px"></label>
+      <label>名称: <input id="goods-name" style="width:100px"></label>
+      <label>X: <input id="goods-x" type="number" step="0.1" style="width:70px"></label>
+      <label>Y: <input id="goods-y" type="number" step="0.1" style="width:70px"></label>
+      <label>Tag: <input id="goods-tag" type="number" style="width:50px"></label>
+      <label>货架: <input id="goods-shelf" style="width:80px"></label>
+      <label>通道: <input id="goods-channel" type="number" style="width:50px"></label>
+    </div>
+    <div class="ctrl-row" style="margin-top:8px">
+      <button id="goods-save">💾 保存</button>
+      <button id="goods-delete" style="background:#7f1d1d">🗑️ 删除</button>
+    </div>
+
+    <div id="goods-status" style="margin-top:8px;font-size:12px;color:#7a8ba0"></div>
+  </div>
+
+  <!-- 📹 视频监控 -->
+  <div id="panel-video" class="panel">
+    <div id="video-container" style="position:relative;flex:1;display:flex;flex-direction:column;padding:12px">
+      <div id="video-canvas-wrap" style="position:relative;flex:1;min-height:0;background:#0a0e14;border-radius:8px;overflow:hidden;border:1px solid #1e2d45">
+        <canvas id="video-canvas" style="width:100%;height:100%;display:block"></canvas>
+        <div id="video-stats" style="position:absolute;top:10px;left:10px;z-index:5;background:rgba(0,0,0,0.7);border-radius:6px;padding:8px 14px;font-family:monospace;font-size:12px;color:#e8edf4;line-height:1.6;min-width:160px">
+          <div>📶 <span id="v-bitrate">--</span> kbps</div>
+          <div>⚡ <span id="v-fps">--</span> fps</div>
+          <div>🕒 <span id="v-latency">--</span> ms</div>
+          <div>📦 <span id="v-frames">0</span> frames</div>
+          <div>🏷️ <span id="v-tags" style="color:#22c55e">--</span></div>
+        </div>
+        <div id="video-status" style="position:absolute;bottom:10px;left:10px;z-index:5;background:rgba(0,0,0,0.7);border-radius:4px;padding:4px 10px;font-size:11px;color:#7a8ba0">
+          ⏳ 等待连接...
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;padding:8px 0 0;font-size:12px;color:#7a8ba0">
+        <label style="cursor:pointer"><input type="checkbox" id="v-atag-toggle" checked> AprilTag 检测</label>
+        <label style="cursor:pointer"><input type="checkbox" id="v-overlay-toggle" checked> 覆盖标记</label>
+        <span style="flex:1"></span>
+        <span>标签尺寸:</span>
+        <input id="v-tag-size" type="number" value="168" min="10" max="500" step="5" style="width:60px;background:#1a2332;border:1px solid #2a3a50;color:#e8edf4;padding:2px 6px;border-radius:3px"> mm
+        <span style="color:#7a8ba0">1280×720</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 仪表盘 -->
+  <div id="panel-dash" class="panel">
+    <h3>📊 传感器数据</h3>
+    <div id="dash-grid">
+      <div class="dash-card"><div class="dash-label">电池电压</div><div class="dash-val" id="d-bat">--</div></div>
+      <div class="dash-card"><div class="dash-label">电量</div><div class="dash-val" id="d-bat-pct">--</div></div>
+      <div class="dash-card"><div class="dash-label">超声波距离</div><div class="dash-val" id="d-us">-- cm</div></div>
+      <div class="dash-card"><div class="dash-label">红外左</div><div class="dash-val" id="d-irl">--</div></div>
+      <div class="dash-card"><div class="dash-label">红外右</div><div class="dash-val" id="d-irr">--</div></div>
+      <div class="dash-card"><div class="dash-label">前向速度</div><div class="dash-val" id="d-vx">-- mm/s</div></div>
+      <div class="dash-card"><div class="dash-label">角速度</div><div class="dash-val" id="d-vz">--</div></div>
+      <div class="dash-card"><div class="dash-label">编码器脉冲</div><div class="dash-val" id="d-enc">--</div></div>
+      <div class="dash-card"><div class="dash-label">IMU 航向角</div><div class="dash-val" id="d-yaw">--°</div></div>
+      <div class="dash-card"><div class="dash-label">IMU 俯仰角</div><div class="dash-val" id="d-pitch">--°</div></div>
+      <div class="dash-card"><div class="dash-label">IMU 横滚角</div><div class="dash-val" id="d-roll">--°</div></div>
+    </div>
+  </div>
+
+  <!-- POI 管理 -->
+  <div id="panel-poi" class="panel">
+    <h3>📍 POI 管理</h3>
+    <ul id="poi-list"></ul>
+    <div>
+      <input id="poi-name" placeholder="名称">
+      <input id="poi-x" placeholder="X" type="number">
+      <input id="poi-y" placeholder="Y" type="number">
+      <button id="poi-add">添加</button>
+    </div>
+  </div>
+
+  <!-- 日志 -->
+  <div id="panel-logs" class="panel">
+    <h3>📋 系统日志 <span id="log-badge" style="font-size:12px;color:#7a8ba0"></span></h3>
+    <div style="display:flex;gap:6px;padding:4px 12px;flex-wrap:wrap" id="log-filters"></div>
+    <div style="display:flex;gap:6px;padding:4px 12px">
+      <input id="llm-input" placeholder="输入指令或问题..." style="flex:1;background:#1a2332;border:1px solid #2a3a50;color:#e8edf4;padding:4px 8px;border-radius:4px">
+      <button id="llm-send" style="padding:4px 12px">发送</button>
+      <button id="log-clear" style="padding:4px 12px">清空</button>
+    </div>
+    <div id="log-list" style="flex:1;overflow-y:auto;padding:0 12px"></div>
+
+    <hr style="border-color:#1a2332;margin:8px 0">
+    <div style="display:flex;gap:6px;padding:4px 12px;align-items:center">
+      <h4 class="section-title" style="margin:0">📋 事件记录</h4>
+      <button id="events-refresh" class="btn-sm">🔄 刷新</button>
+      <button id="events-add" class="btn-sm">➕ 记录事件</button>
+    </div>
+    <div id="events-list" style="padding:4px 12px;max-height:120px;overflow-y:auto;font-family:monospace;font-size:11px;color:#7a8ba0"></div>
+  </div>
+</div>
+
+<script type="module" src="/main.ts"></script>
+</body>
+</html>
