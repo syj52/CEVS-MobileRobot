@@ -429,6 +429,11 @@ export class TcpServer {
     for (const sock of this.clients) sock.write(data);
   }
 
+  /** Send raw binary buffer (no \r\n appended) — used for TTS audio */
+  sendToAllRaw(buf: Buffer) {
+    for (const sock of this.clients) sock.write(buf);
+  }
+
   sendMotorFrame(frame: string) {
     this.sendToAll(frame);
   }

@@ -243,6 +243,22 @@
 
     <hr style="border-color:#1a2332;margin:12px 0">
 
+    <!-- 🔈 TTS 语音测试 -->
+    <h4 class="section-title">🔈 语音测试</h4>
+    <div class="ctrl-row" style="gap:6px">
+      <input id="tts-text" type="text" value="你好，我是 CEVS 机器人" style="flex:1;background:#1a2332;border:1px solid #2a3a50;color:#e8edf4;padding:4px 8px;border-radius:4px">
+      <button id="tts-send" class="btn-sm primary">🔊 播放</button>
+    </div>
+    <div class="ctrl-row" style="gap:8px;font-size:12px;color:#7a8ba0;margin-top:4px">
+      <span>🔇</span>
+      <input type="range" id="tts-volume" min="0" max="100" value="70" style="flex:1;max-width:120px">
+      <span id="tts-vol-val">70%</span>
+      <span>🔊</span>
+    </div>
+    <div id="tts-status" class="status-text">输入文字，点击播放测试喇叭</div>
+
+    <hr style="border-color:#1a2332;margin:12px 0">
+
     <div style="font-size:11px;color:#7a8ba0;margin-top:4px">位姿设置与调试信息已移至「导航地图」面板右侧</div>
   </div>
 

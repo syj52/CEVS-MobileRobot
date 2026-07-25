@@ -35,45 +35,77 @@ async function generatePcm(text: string): Promise<Buffer | null> {
     return null;
   }
   return new Promise((resolve) => {
+    /* edge-tts 默认输出 MP3，需要转成 16kHz 16-bit mono PCM。
+       --format 在旧版本 edge-tts 中不支持，所以用 ffmpeg 转换。 */
     const [cmd, ...args] = EDGE_TTS_CMD.split(' ');
-    args.push('--text', text, '--voice', 'zh-CN-XiaoxiaoNeural', '--rate', '+0%', '--write-media', '-', '--write-subtitles', 'none');
+    args.push('--text', text, '--voice', 'zh-CN-XiaoxiaoNeural', '--rate', '+0%',
+              '--write-media', '-', '--write-subtitles', 'none');
     const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const chunks: Buffer[] = [];
-    proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
-    proc.on('close', (code) => {
-      if (code !== 0 || chunks.length === 0) { console.warn(`[tts] edge-tts exit=${code}`); resolve(null); return; }
-      const wavBuf = Buffer.concat(chunks);
-      const dataIdx = wavBuf.indexOf(Buffer.from('data'));
-      if (dataIdx < 0) { resolve(wavBuf); return; }
-      const pcmOffset = dataIdx + 8;
-      const pcmLen = wavBuf.readUInt32LE(dataIdx + 4);
-      let pcm = wavBuf.subarray(pcmOffset, pcmOffset + pcmLen);
-      const sr = wavBuf.readUInt32LE(24);
-      if (sr > SAMPLE_RATE) {
-        const ratio = Math.round(sr / SAMPLE_RATE);
-        const newLen = Math.floor(pcm.length / ratio / 2) * 2;
-        const down = Buffer.alloc(newLen);
-        for (let i = 0; i < newLen / 2; i++) down.writeInt16LE(pcm.readInt16LE(i * ratio * 2), i * 2);
-        pcm = down;
-        console.log(`[tts] Resampled ${sr}Hz → ${SAMPLE_RATE}Hz (ratio=${ratio})`);
+
+    /* 用 ffmpeg 将 edge-tts 的输出转为 16kHz 16-bit mono PCM */
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', 'pipe:0',
+      '-f', 's16le',
+      '-ar', String(SAMPLE_RATE),
+      '-ac', '1',
+      '-loglevel', 'error',
+      'pipe:1',
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    proc.stdout.pipe(ffmpeg.stdin);
+
+    const pcmChunks: Buffer[] = [];
+    ffmpeg.stdout.on('data', (chunk: Buffer) => pcmChunks.push(chunk));
+
+    let ffmpegErr = '';
+    ffmpeg.stderr.on('data', (d: Buffer) => { ffmpegErr += d.toString(); });
+
+    proc.stderr.on('data', (d: Buffer) => {
+      const s = d.toString().trim();
+      if (s) console.log(`[tts:edge] ${s}`);
+    });
+    proc.on('error', () => { resolve(null); });
+
+    ffmpeg.on('close', (code) => {
+      if (code !== 0 || pcmChunks.length === 0) {
+        console.warn(`[tts] ffmpeg exit=${code}: ${ffmpegErr.trim()}`);
+        resolve(null);
+        return;
       }
-      console.log(`[tts] ${(pcm.length / SAMPLE_RATE / 2).toFixed(1)}s TTS (${pcm.length}B PCM)`);
+      const pcm = Buffer.concat(pcmChunks);
+      console.log(`[tts] PCM: ${pcm.length}B (${(pcm.length / SAMPLE_RATE / 2).toFixed(1)}s @ ${SAMPLE_RATE}Hz)`);
       resolve(pcm);
     });
-    proc.stderr.on('data', (d: Buffer) => { const s = d.toString().trim(); if (s) console.log(`[tts:edge] ${s}`); });
-    setTimeout(() => { if (!proc.killed) { proc.kill(); resolve(null); } }, 15000);
+
+    setTimeout(() => {
+      if (!proc.killed) { proc.kill(); ffmpeg.kill(); resolve(null); }
+    }, 20000);
   });
 }
 
 let tcpServer: TcpServer | null = null;
 export function setTcpServer(srv: TcpServer) { tcpServer = srv; }
 
-export async function speak(text: string): Promise<boolean> {
+/** Scale int16 PCM by volume factor (0.0–1.0) */
+function scaleVolume(pcm: Buffer, vol: number): Buffer {
+  if (vol >= 1.0) return pcm;
+  const out = Buffer.alloc(pcm.length);
+  for (let i = 0; i < pcm.length; i += 2) {
+    const s = pcm.readInt16LE(i);
+    const scaled = Math.round(s * vol);
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, scaled)), i);
+  }
+  return out;
+}
+
+export async function speak(text: string, volume = 1.0): Promise<boolean> {
   if (!tcpServer) { console.warn('[tts] TCP server not set'); return false; }
   const pcm = await generatePcm(text);
   if (!pcm || pcm.length === 0) return false;
-  const header = Buffer.from(`$TTS:${pcm.length}\r\n`);
-  tcpServer.sendToAllRaw(Buffer.concat([header, pcm]));
-  console.log(`[tts] Sent ${pcm.length}B TTS audio to ESP32`);
+  const out = scaleVolume(pcm, volume);
+  const tag = (volume < 1.0) ? ` @ ${Math.round(volume * 100)}%` : '';
+  const header = Buffer.from(`$TTS:${out.length}\r\n`);
+  tcpServer.sendToAllRaw(Buffer.concat([header, out]));
+  console.log(`[tts] Sent ${out.length}B TTS audio to ESP32${tag}`);
   return true;
 }

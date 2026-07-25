@@ -1,5 +1,5 @@
 import { createServer } from 'http';
-import { createExpressApp, setMapPusher } from './server/express.js';
+import { createExpressApp, setMapPusher, setSendToEsp } from './server/express.js';
 import { TcpServer, tcpStats, setPosPush } from './server/tcp.js';
 import { startWebSocket, broadcast, wsStats, setMotorHandler } from './server/websocket.js';
 import { mqttClient } from './server/mqtt.js';
@@ -7,6 +7,7 @@ import { navApi, setTcpSend } from './api/navigation.js';
 import { ApriltagDetector } from './server/apriltagDetector.js';
 import { setDropNotifier, pickDirect } from './api/goods.js';
 import { initVoiceService, onVoiceCommand } from './server/voiceService.js';
+import { setTcpServer, speak } from './server/ttsService.js';
 import { setCalibMotorSender } from './server/motionCalib.js';
 import { startTagNav } from './api/tagNav.js';
 import { state } from './state.js';
@@ -26,11 +27,13 @@ async function main() {
 
   // TCP server (ESP32) — handles commands + video frames
   const tcpServer = new TcpServer(TCP_PORT);
+  setTcpServer(tcpServer);  // for TTS → ESP32 audio
   setPosPush((x, y, aDeg) => {
     tcpServer.sendToAll(`CMD:POS:x=${x.toFixed(3)},y=${y.toFixed(3)},a=${aDeg.toFixed(1)}\r\n`);
   });
   setMotorHandler((frame) => tcpServer.sendToAll(frame));
   setTcpSend((msg) => tcpServer.sendToAll(msg));
+  setSendToEsp((msg) => tcpServer.sendToAll(msg));
   setCalibMotorSender((frame) => tcpServer.sendToAll(frame));
   setMapPusher(async () => { await tcpServer.pushMapToAll(); });
 

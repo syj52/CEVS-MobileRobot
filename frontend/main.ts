@@ -1035,6 +1035,33 @@ document.getElementById('llm-send')!.addEventListener('click', async () => {
   if (e.key === 'Enter') (document.getElementById('llm-send') as HTMLButtonElement).click();
 });
 
+// ─── TTS test ────────────────────────────────────────────────
+document.getElementById('tts-send')!.addEventListener('click', async () => {
+  const input = document.getElementById('tts-text') as HTMLInputElement;
+  const text = input.value.trim();
+  if (!text) { document.getElementById('tts-status')!.textContent = '请输入文字'; return; }
+  const vol = parseInt((document.getElementById('tts-volume') as HTMLInputElement).value) / 100;
+  document.getElementById('tts-status')!.textContent = '生成语音中...';
+  try {
+    const r = await fetch(`${API}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, volume: vol }),
+    });
+    const d = await r.json();
+    document.getElementById('tts-status')!.textContent = d.ok ? `✅ 已发送: "${text}"` : `❌ ${d.error || '失败'}`;
+  } catch (e) {
+    document.getElementById('tts-status')!.textContent = `❌ 请求失败: ${(e as Error).message}`;
+  }
+});
+(document.getElementById('tts-text') as HTMLInputElement).addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') (document.getElementById('tts-send') as HTMLButtonElement).click();
+});
+// Volume slider
+document.getElementById('tts-volume')!.addEventListener('input', function () {
+  document.getElementById('tts-vol-val')!.textContent = this.value + '%';
+});
+
 // ─── Log clear ───────────────────────────────────────────────
 document.getElementById('log-clear')!.addEventListener('click', () => {
   logList.innerHTML = '';

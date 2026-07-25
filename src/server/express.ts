@@ -6,12 +6,16 @@ import fs from 'fs';
 import type { Server as HttpServer } from 'http';
 import { state } from '../state.js';
 import { navApi } from '../api/navigation.js';
+import { speak } from './ttsService.js';
 import { poiApi } from '../api/poi.js';
 import { debugOdom, getTagMap, setTagMapEntry, deleteTagMapEntry, getTagFusionStatus, lastTagPose, pushPosToEsp } from './tcp.js';
 import { broadcast } from './websocket.js';
 import { startTagNav, cancelTagNav, getTagNavStatus } from '../api/tagNav.js';
 import { goodsApi } from '../api/goods.js';
 import { startTurnCalib, startDriveCalib, cancelCalib, getCalibStatus } from './motionCalib.js';
+
+let sendToEsp: ((msg: string) => void) | null = null;
+export function setSendToEsp(fn: (msg: string) => void) { sendToEsp = fn; }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', '..', 'public');
@@ -138,6 +142,14 @@ export function createExpressApp(httpServer?: HttpServer) {
     navApi.sendMotorFrame(frame);
     res.json({ ok: true, frame });
   });
+  // Debug: send raw CMD to ESP32
+  app.post('/api/debug/send', (req, res) => {
+    const { cmd } = req.body as { cmd?: string };
+    if (!cmd) return res.status(400).json({ error: 'cmd required' });
+    if (sendToEsp) sendToEsp(cmd + '\r\n');
+    console.log(`[debug] sent to ESP: ${cmd}`);
+    res.json({ ok: true, cmd });
+  });
   // Camera intrinsics config
   const cameraCfgPath = join(__dirname, '..', '..', 'config', 'camera.json');
   const defaults = { fx: 900, fy: 900, cx: 640, cy: 360, tag_size_m: 0.168 };
@@ -198,6 +210,21 @@ export function createExpressApp(httpServer?: HttpServer) {
   // 扫码取货确认页 (二维码指向 /pick?goods=<id>)
   app.get('/pick', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'pick.html')));
   app.use(express.static(PUBLIC_DIR));
+
+  // TTS test — text → edge-tts → ESP32 speaker
+  app.post('/api/tts', async (req, res) => {
+    try {
+      const { text, volume } = req.body || {};
+      if (!text) return res.status(400).json({ error: 'text required' });
+      const vol = (typeof volume === 'number') ? Math.max(0, Math.min(1, volume)) : 1.0;
+      const ok = await speak(text, vol);
+      const note = !ok ? 'edge-tts 未安装或 TCP 未连接' : (vol < 1.0 ? `音量 ${Math.round(vol * 100)}%` : '');
+      res.json({ ok, text, volume: vol, note });
+    } catch (e) {
+      console.error('[tts] Error:', (e as Error).message);
+      res.status(500).json({ ok: false, error: (e as Error).message });
+    }
+  });
 
   // LLM
   app.post('/api/llm/chat', async (req, res) => {
