@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { state } from '../state.js';
 import { mqttClient } from '../server/mqtt.js';
 import { lastTagPose } from '../server/tcp.js';
+import { advancePath, applySegment, startPath, pathComplete, pathReachedWait } from '../server/pathPlanner.js';
 import { tagNavExecDone } from './tagNav.js';
 
 /** Callback set by main.ts after TcpServer is created */
@@ -70,24 +71,23 @@ export const navApi = {
 
   /** Handle EXEC: responses from STM32/ESP32 */
   handleEspResponse(line: string) {
-    if (line.startsWith('EXEC:NAV_DONE')) {
-      // 解析里程计数据更新位置: d=距离(mm), a=角度变化(°)
-      const dMatch = line.match(/d=([-\d.]+)/);
-      const aMatch = line.match(/a=([-\d.]+)/);
-      if (dMatch) {
-        const dMm = parseFloat(dMatch[1]);
-        const aDeg = aMatch ? parseFloat(aMatch[1]) : 0;
+    // 所有 EXEC 信号都尝试推进路径（NAV_S, NAV_DONE 均触发）
+    const isNav = line.startsWith('EXEC:NAV_DONE') || line.startsWith('EXEC:NAV_S');
+    if (isNav) {
+      const seg = advancePath();
+      if (seg) {
         const pos = state.robot.position;
-        const hRad = pos.angle;
-        const dM = dMm / 1000;
-        const newX = pos.x + dM * Math.cos(hRad);
-        const newY = pos.y + dM * Math.sin(hRad);
-        const newAngle = pos.angle + aDeg * Math.PI / 180;
-        state.updateRobot({ position: { x: newX, y: newY, angle: newAngle } });
-        lastTagPose.x = newX; lastTagPose.y = newY;
-        lastTagPose.angle = newAngle; lastTagPose.ts = Date.now();
-        console.log(`[nav] NAV_DONE: d=${dMm}mm a=${aDeg}° → (${newX.toFixed(3)},${newY.toFixed(3)})@${(newAngle*180/Math.PI).toFixed(1)}°`);
+        const newPos = applySegment(pos, seg);
+        state.updateRobot({ position: newPos });
+        lastTagPose.x = newPos.x; lastTagPose.y = newPos.y;
+        lastTagPose.angle = newPos.angle; lastTagPose.ts = Date.now();
+        console.log('[nav] PATH OK: seg=' + seg.d_mm + '/' + seg.a_deg + ' pos=(' + newPos.x.toFixed(3) + ',' + newPos.y.toFixed(3) + ')');
+      } else {
+        console.log('[nav] PATH no-seg (no active path)');
       }
+    }
+
+    if (line.startsWith('EXEC:NAV_DONE')) {
       const consumed = tagNavExecDone();
       if (!consumed) state.updateRobot({ status: 'idle' });
     } else if (line.startsWith('EXEC:NAV_TIMEOUT') || line.startsWith('EXEC:NAV_CANCEL')) {
