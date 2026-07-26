@@ -72,7 +72,7 @@ export const navApi = {
   /** Handle EXEC: responses from STM32/ESP32 */
   handleEspResponse(line: string) {
     // 所有 EXEC 信号都尝试推进路径（NAV_S, NAV_DONE 均触发）
-    const isNav = line.startsWith('EXEC:NAV_DONE') || line.startsWith('EXEC:NAV_S');
+    const isNav = line.startsWith('EXEC:NAV_S');
     if (isNav) {
       const seg = advancePath();
       if (seg) {
