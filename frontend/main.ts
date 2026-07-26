@@ -604,7 +604,8 @@ function worldToCanvasX(wx: number, cellSize: number, offsetX: number): number {
   return offsetX + (wx - LOCAL_MAP_OX) / LOCAL_MAP_RES * cellSize;
 }
 function worldToCanvasY(wy: number, cellSize: number, offsetY: number): number {
-  const row = (wy - LOCAL_MAP_OY) / LOCAL_MAP_RES;
+  /* 翻转 Y: 世界坐标 Y 越大 → 画布上越靠上（row 越小） */
+  const row = (LOCAL_MAP_OY + LOCAL_MAP_H * LOCAL_MAP_RES - wy) / LOCAL_MAP_RES;
   return offsetY + row * cellSize;
 }
 
