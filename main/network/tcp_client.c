@@ -37,7 +37,6 @@ static TaskHandle_t s_task_handle;
 
 /* ─── Diagnostics: connection tracking ──────────────────────── */
 static int  s_connect_count = 0;       /* total successful connects */
-static int  s_send_fails    = 0;       /* total send failures */
 static TickType_t s_connect_tick = 0;  /* time of last connect */
 
 #define LINE_BUF_SIZE 2048

@@ -167,6 +167,5 @@ bool audio_spk_is_playing(void) { return s_playing; }
 
 void audio_spk_stop(void)
 {
-    if (s_play_buf) vRingbufferReset(s_play_buf);
     s_playing = false;
 }
