@@ -812,7 +812,7 @@ async function drawMap() {
   if (tagMap) {
     for (const [idStr, entry] of Object.entries(tagMap)) {
       const tpx = worldToCanvasX((entry as any).x, cellSize, offsetX);
-      const tpy = worldToCanvasY((entry as any).y, cellSize, offY);
+      const tpy = worldToCanvasY(-(entry as any).y, cellSize, offY);
       const yaw = (entry as any).yaw || 0;
       // Ceiling tag: square outline (top-down projection)
       const hs = 7;
