@@ -1,5 +1,4 @@
 #include <string.h>
-#include <math.h>
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -315,29 +314,6 @@ static void dispatch_cmd(const char *line)
         return;
     }
 
-    /* 诊断：CMD:TONE=<freq>,<dur_ms>,<amp> — 通过 audio_spk_play 路径播放正弦波 */
-    if (memcmp(cmd, "TONE=", 5) == 0) {
-        int freq = 1000, dur = 500, amp = 10000;
-        sscanf(cmd + 5, "%d,%d,%d", &freq, &dur, &amp);
-        if (amp > 32767) amp = 32767;
-        if (amp < 1) amp = 1;
-        /* 生成 mono PCM 并走 audio_spk_play（含 stereo 扩展 + ring buffer） */
-        int n_samples = 16000 * dur / 1000;
-        size_t mono_len = n_samples * 2;
-        uint8_t *buf = heap_caps_malloc(mono_len, MALLOC_CAP_8BIT);
-        if (buf) {
-            for (int i = 0; i < n_samples; i++) {
-                ((int16_t *)buf)[i] = (int16_t)(amp * sinf(2 * 3.14159f * freq * i / 16000));
-            }
-            esp_err_t r = audio_spk_play(buf, mono_len);
-            ESP_LOGI(TAG, "TONE via audio_spk_play: %dHz %dms amp=%d → %s",
-                     freq, dur, amp, r == ESP_OK ? "OK" : "FAIL");
-            free(buf);
-        }
-        send(s_sock, "OK:TONE\r\n", 9, 0);
-        return;
-    }
-
     if (strcmp(cmd, "STOP") == 0) {
         motion_stop();
         s_esp_state = ESP_IDLE;
@@ -493,44 +469,22 @@ static void tcp_client_task(void *arg)
 
         /* ── TTS 二进制数据接收 ── */
         if (s_tts_need > 0 && s_tts_buf) {
-            /* 只用 s_line_buf（已累积了所有 recv 数据，见上文的 memcpy）。
-               绝不用 read_buf —— 它和 s_line_buf 里的是同一份数据，
-               同时处理两份会导致 PCM 数据被重复计数，s_tts_recv 提前达标，
-               实际 PCM 只收了一半就开始播放 ⇒ 杂音。 */
-            if (s_line_len > 0) {
-                int can = s_tts_need - s_tts_recv;
-                if (can > s_line_len) can = s_line_len;
-                memcpy(s_tts_buf + s_tts_recv, s_line_buf, can);
-                s_tts_recv += can;
-                memmove(s_line_buf, s_line_buf + can, s_line_len - can);
-                s_line_len -= can;
+            int can = s_tts_need - s_tts_recv;
+            if (can > len) can = len;
+            memcpy(s_tts_buf + s_tts_recv, read_buf, can);
+            s_tts_recv += can;
+            int rest = len - can;
+            if (rest > 0) {
+                memmove(read_buf, read_buf + can, rest);
+                len = rest;
+            } else {
+                len = 0;
             }
-            /* TTS 数据在 s_line_buf 里处理完了，不让 LINE 解析器再碰 */
-            len = 0;
             if (s_tts_recv >= s_tts_need) {
                 ESP_LOGI(TAG, "TTS received %d bytes, playing...", s_tts_recv);
-                /* ██ 诊断：检查 PCM 数据有效性 ██ */
-                {
-                    int16_t *smp = (int16_t *)s_tts_buf;
-                    int n = s_tts_recv / 2;
-                    int16_t vmin = 32767, vmax = -32768;
-                    int64_t sum = 0;
-                    for (int j = 0; j < n && j < 500; j++) {
-                        int16_t v = smp[j];
-                        if (v < vmin) vmin = v;
-                        if (v > vmax) vmax = v;
-                        sum += (v < 0 ? -v : v);
-                    }
-                    ESP_LOGI(TAG, "PCM: %d samples, min=%d max=%d avg(|x|)=%lld, first16=[%04x %04x %04x %04x %04x %04x %04x %04x]",
-                             n, vmin, vmax, (long long)(sum / (n < 500 ? n : 500)),
-                             (uint16_t)smp[0], (uint16_t)smp[1], (uint16_t)smp[2], (uint16_t)smp[3],
-                             (uint16_t)smp[4], (uint16_t)smp[5], (uint16_t)smp[6], (uint16_t)smp[7]);
-                }
                 audio_spk_play(s_tts_buf, s_tts_recv);
                 free(s_tts_buf); s_tts_buf = NULL;
                 s_tts_need = 0; s_tts_recv = 0;
-                /* 清掉 s_line_buf 残留的 PCM 数据，防止被 LINE 解析器当命令处理 */
-                s_line_len = 0;
             }
         }
 
@@ -546,17 +500,8 @@ static void tcp_client_task(void *arg)
                     }
                     if (line_len > 0) {
                         s_line_buf[line_len] = '\0';
-                        /* TTS PCM 数据不打印（二进制乱码） */
-                        if (s_tts_need == 0) ESP_LOGI(TAG, "recv: %s", s_line_buf);
+                        ESP_LOGI(TAG, "recv: %s", s_line_buf);
                         dispatch_cmd(s_line_buf);
-                        /* $TTS: 后紧跟 PCM，立即退出行解析 */
-                        if (s_tts_need > 0) {
-                            if (s_line_len > processed) {
-                                memmove(s_line_buf, s_line_buf + processed, s_line_len - processed);
-                                s_line_len -= processed;
-                            } else { s_line_len = 0; }
-                            goto tts_drain;
-                        }
                     }
                     break;
                 }
@@ -566,40 +511,6 @@ static void tcp_client_task(void *arg)
                 s_line_len -= processed;
             } else {
                 break;
-            }
-        }
-tts_drain:
-        /* 立即排空 s_line_buf 中残留的 PCM 数据（$TTS: 头之后的部分） */
-        if (s_tts_need > 0 && s_tts_buf && s_line_len > 0) {
-            int can = s_tts_need - s_tts_recv;
-            if (can > s_line_len) can = s_line_len;
-            memcpy(s_tts_buf + s_tts_recv, s_line_buf, can);
-            s_tts_recv += can;
-            memmove(s_line_buf, s_line_buf + can, s_line_len - can);
-            s_line_len -= can;
-            if (s_tts_recv >= s_tts_need) {
-                ESP_LOGI(TAG, "TTS received %d bytes, playing...", s_tts_recv);
-                /* ██ 诊断：检查 PCM 数据有效性 ██ */
-                {
-                    int16_t *smp = (int16_t *)s_tts_buf;
-                    int n = s_tts_recv / 2;
-                    int16_t vmin = 32767, vmax = -32768;
-                    int64_t sum = 0;
-                    for (int j = 0; j < n && j < 500; j++) {
-                        int16_t v = smp[j];
-                        if (v < vmin) vmin = v;
-                        if (v > vmax) vmax = v;
-                        sum += (v < 0 ? -v : v);
-                    }
-                    ESP_LOGI(TAG, "PCM: %d samples, min=%d max=%d avg(|x|)=%lld, first16=[%04x %04x %04x %04x %04x %04x %04x %04x]",
-                             n, vmin, vmax, (long long)(sum / (n < 500 ? n : 500)),
-                             (uint16_t)smp[0], (uint16_t)smp[1], (uint16_t)smp[2], (uint16_t)smp[3],
-                             (uint16_t)smp[4], (uint16_t)smp[5], (uint16_t)smp[6], (uint16_t)smp[7]);
-                }
-                audio_spk_play(s_tts_buf, s_tts_recv);
-                free(s_tts_buf); s_tts_buf = NULL;
-                s_tts_need = 0; s_tts_recv = 0;
-                s_line_len = 0; /* clear residual PCM from line buffer */
             }
         }
 
