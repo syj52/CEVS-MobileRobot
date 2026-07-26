@@ -1,6 +1,6 @@
 import type { RobotState, GridMap, PoiRecord } from './types.js';
 import { loadNavMap } from './loadMap.js';
-const INITIAL_POS = { x: 0, y: 0, angle: 0 };
+const INITIAL_POS = { x: 0, y: 0, angle: Math.PI };
 
 class State {
   robot: RobotState = {
