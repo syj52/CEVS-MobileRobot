@@ -16,7 +16,7 @@ import { startTurnCalib, startDriveCalib, cancelCalib, getCalibStatus } from './
 import { chatCompletion } from './dashscope.js';
 import { executeCommand } from './commandExecutor.js';
 import { buildKnowledgeContext } from './knowledgeBase.js';
-import { startPath } from './pathPlanner.js';
+import { getPathSegments, applySegment } from './pathPlanner.js';
 
 let sendToEsp: ((msg: string) => void) | null = null;
 export function setSendToEsp(fn: (msg: string) => void) { sendToEsp = fn; }
@@ -138,11 +138,9 @@ export function createExpressApp(httpServer?: HttpServer) {
 
   // 固定路径模式: !PATH:<n>#  → STM32 按预设轨迹移动
   app.post('/api/path/:id', (req, res) => {
-    startPath(parseInt(req.params.id));
     const n = parseInt(req.params.id);
     console.log(`[path] POST /api/path/${n} called, sendToEsp=${!!sendToEsp}`);
     if (isNaN(n) || n < 0 || n > 6) return res.status(400).json({ error: 'invalid path id (0-6)' });
-    if (n >= 1 && n <= 6) startPath(n);
     const cmd = `!PATH:${n}#`;
     if (sendToEsp) {
       sendToEsp(cmd + '\r\n');
