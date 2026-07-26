@@ -48,12 +48,12 @@
 
   <div class="section-title">📍 固定路径</div>
   <div class="grid" id="path-btns">
-    <div class="btn path" data-path="1"><span class="icon">➡️</span><div class="label">路径1</div><div class="desc">短距往返</div></div>
-    <div class="btn path" data-path="2"><span class="icon">🏃</span><div class="label">路径2</div><div class="desc">长距往返</div></div>
-    <div class="btn path" data-path="3"><span class="icon">↩️</span><div class="label">路径3</div><div class="desc">弯绕路线</div></div>
-    <div class="btn path" data-path="4"><span class="icon">➡️</span><div class="label">路径4</div><div class="desc">同3远距</div></div>
-    <div class="btn path" data-path="5"><span class="icon">🏃</span><div class="label">路径5</div><div class="desc">同3最远</div></div>
-    <div class="btn path" data-path="6"><span class="icon">↩️</span><div class="label">路径6</div><div class="desc">左转L型</div></div>
+    <div class="btn path" data-path="1"><span class="icon">➡️</span><div class="label">货架1</div><div class="desc">短距往返</div></div>
+    <div class="btn path" data-path="2"><span class="icon">🏃</span><div class="label">货架2</div><div class="desc">长距往返</div></div>
+    <div class="btn path" data-path="3"><span class="icon">↩️</span><div class="label">货架3</div><div class="desc">弯绕路线</div></div>
+    <div class="btn path" data-path="4"><span class="icon">➡️</span><div class="label">货架4</div><div class="desc">同3远距</div></div>
+    <div class="btn path" data-path="5"><span class="icon">🏃</span><div class="label">货架5</div><div class="desc">同3最远</div></div>
+    <div class="btn path" data-path="6"><span class="icon">↩️</span><div class="label">货架6</div><div class="desc">左转L型</div></div>
   </div>
 
   <div class="status-msg" id="status-msg"></div>
@@ -93,9 +93,9 @@ async function sendApi(url, body) {
 document.querySelectorAll('[data-path]').forEach(el => {
   el.addEventListener('click', async () => {
     const n = el.dataset.path;
-    showMsg('路径' + n + ' 启动中...', 'busy');
+    showMsg('货架' + n + ' 启动中...', 'busy');
     await sendApi(API + '/path/' + n);
-    showMsg('✅ 路径' + n + ' 已启动');
+    showMsg('✅ 货架' + n + ' 已启动');
   });
 });
 
@@ -107,8 +107,8 @@ document.getElementById('btn-stop').addEventListener('click', async () => {
 
 // Return
 document.getElementById('btn-return').addEventListener('click', async () => {
-  await sendApi(API + '/nav', { x: 0, y: 0 });
-  showMsg('🏠 正在返回原点', 'busy');
+  await fetch(API + '/stop', { method: 'POST' });
+  showMsg('🛑 已停止');
 });
 
 // Load POIs and status

@@ -42,6 +42,12 @@ const GOODS: Record<string, Goods> = {
   '1': { id: '1', name: '货架B', x:  0.30, y:  0.80, tag: 1, shelf: '右上B', dropChannel: 2 },
   '2': { id: '2', name: '货架C', x: -0.30, y: -0.80, tag: 2, shelf: '左下C', dropChannel: 3 },
   '3': { id: '3', name: '货架D', x:  0.30, y: -0.80, tag: 3, shelf: '右下D', dropChannel: 4 },
+  '4': { id: '4', name: '货架1', x: 0, y: 0.30, shelf: '货架1', trajectoryId: '1' },
+  '5': { id: '5', name: '货架2', x: 0, y: -0.30, shelf: '货架2', trajectoryId: '2' },
+  '6': { id: '6', name: '货架3', x: -0.30, y: 0, shelf: '货架3', trajectoryId: '3' },
+  '7': { id: '7', name: '货架4', x: 0.30, y: 0, shelf: '货架4', trajectoryId: '4' },
+  '8': { id: '8', name: '货架5', x: 0, y: 0, shelf: '货架5', trajectoryId: '5' },
+  '9': { id: '9', name: '货架6', x: 0, y: 0, shelf: '货架6', trajectoryId: '6' },
 };
 
 // ─── 当前取货订单 (单车系统, 一次一单) ──────────────────────
