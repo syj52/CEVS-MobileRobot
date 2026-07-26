@@ -27,6 +27,8 @@ CONFIG_FILE = os.path.join(
 CAM_K = None       # 3×3 camera matrix
 CAM_DIST = None    # distortion coefficients
 TAG_SIZE_M = 0.168
+CEILING_H_M = 2.8    # 天花板高度（m），用于稳定垂直摄像头 Z 轴估计
+CAM_H_M = 0.2        # 摄像头安装高度（m）
 
 defaults = {"fx": 1800, "fy": 1700, "cx": 640, "cy": 360, "tag_size_m": 0.168}
 if os.path.exists(CONFIG_FILE):
@@ -48,6 +50,8 @@ if os.path.exists(CONFIG_FILE):
         else:
             CAM_DIST = np.zeros((5, 1), dtype=np.float64)
 
+        CEILING_H_M = cfg.get("ceiling_height_m", CEILING_H_M)
+        CAM_H_M = cfg.get("camera_height_m", CAM_H_M)
         sys.stderr.write(
             f"[camera] Calibrated: fx={CAM_K[0,0]:.0f} fy={CAM_K[1,1]:.0f} "
             f"dist={len(CAM_DIST)} coeffs, tag={TAG_SIZE_M*1000:.0f}mm\n"
@@ -81,6 +85,13 @@ try:
     dic = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
     params = cv2.aruco.DetectorParameters()
     params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
+    # ── 光照鲁棒性调优 ──
+    params.adaptiveThreshWinSizeMin = 3      # 最小窗口（默认 3）
+    params.adaptiveThreshWinSizeMax = 23     # 最大窗口（默认 23）
+    params.adaptiveThreshWinSizeStep = 5     # 步长（默认 10）
+    params.adaptiveThreshConstant = 7        # 阈值常数，找暗处 tag（默认 7）
+    params.minMarkerPerimeterRate = 0.04     # 允许更小的标记（默认 0.05）
+    params.maxMarkerPerimeterRate = 0.50     # （默认 0.50）
     DETECTOR = cv2.aruco.ArucoDetector(dic, params)
 except AttributeError:
     try:
@@ -107,6 +118,10 @@ def detect_tags(jpeg_bytes):
     img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
     if img is None:
         return []  # bad frame
+
+    # ── 光照预处理：CLAHE 解决天花板灯太亮导致 tag 过曝的问题 ──
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    img = clahe.apply(img)
 
     # Detect
     if isinstance(DETECTOR, tuple):
@@ -157,6 +172,22 @@ def detect_tags(jpeg_bytes):
 
         tx, ty, tz = float(cam_pos[0]), float(cam_pos[1]), float(cam_pos[2])
         yaw = compute_yaw(R_mat)
+
+        # ── 诊断日志：记录原始 solvePnP 输出（tag 帧调试用） ──
+        sys.stderr.write(
+            f"[solvePnP] id={tag_id} raw: tx={tx:.4f} ty={ty:.4f} tz={tz:.4f} yaw={yaw:.1f}°\n"
+        )
+
+        # ── 天花板 tag 校正：用已知高度固定 Z，消除垂直摄像头 Z 轴漂移 ──
+        # 相机垂直朝上时 solvePnP 的 Z 估计噪声大，但 tx/ty 与 tz 成比例。
+        # 固定 tz 为已知天花高度后重新缩放 tx/ty。
+        expected_tz = CEILING_H_M - CAM_H_M  # 相机到天花板的距离
+        if tz > 0 and expected_tz > 0:
+            scale = expected_tz / tz
+            if 0.5 < scale < 2.0:  # 只在大幅偏离时修正（防止异常值）
+                tx *= scale
+                ty *= scale
+                tz = expected_tz
 
         # pixel_size: average of two side lengths at 0° (top edge), in pixels
         corners_int = [[int(p[0]), int(p[1])] for p in img_pts]

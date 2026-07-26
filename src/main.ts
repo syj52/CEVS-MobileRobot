@@ -3,14 +3,15 @@ import { createExpressApp, setMapPusher, setSendToEsp } from './server/express.j
 import { TcpServer, tcpStats, setPosPush } from './server/tcp.js';
 import { startWebSocket, broadcast, wsStats, setMotorHandler } from './server/websocket.js';
 import { mqttClient } from './server/mqtt.js';
-import { navApi, setTcpSend } from './api/navigation.js';
+import { navApi, setTcpSend, onPathDone } from './api/navigation.js';
 import { ApriltagDetector } from './server/apriltagDetector.js';
-import { setDropNotifier, pickDirect } from './api/goods.js';
+import { setDropNotifier, setTrajectoryNotifier, pickDirect } from './api/goods.js';
 import { initVoiceService, onVoiceCommand } from './server/voiceService.js';
 import { setTcpServer, speak } from './server/ttsService.js';
 import { setCalibMotorSender } from './server/motionCalib.js';
 import { startTagNav } from './api/tagNav.js';
 import { state } from './state.js';
+import { setCommandSender, executeCommand } from './server/commandExecutor.js';
 
 const TCP_PORT = 5000;
 const API_PORT = 8000;
@@ -35,6 +36,7 @@ async function main() {
   setTcpSend((msg) => tcpServer.sendToAll(msg));
   setSendToEsp((msg) => tcpServer.sendToAll(msg));
   setCalibMotorSender((frame) => tcpServer.sendToAll(frame));
+  setCommandSender((msg) => tcpServer.sendToAll(msg));
   setMapPusher(async () => { await tcpServer.pushMapToAll(); });
 
   const apriltagD = new ApriltagDetector();
@@ -48,33 +50,26 @@ async function main() {
     console.log(`[cevs] 投货指令已发送: ${cmd.trim()}`);
   });
 
+  // 固定轨迹通知: goods.trajectoryId → !PATH:<n># → STM32
+  setTrajectoryNotifier((trajectoryId: string) => {
+    const n = parseInt(trajectoryId);
+    if (n >= 1 && n <= 6) {
+      tcpServer.sendToAll(`!PATH:${n}#`);
+      console.log(`[cevs] 🛤️ 路径 ${n} 已发送`);
+    }
+  });
+
+  // 路径完成后自动返程（用于演示：走路径1到达后自动路径2返回）
+  onPathDone(() => {
+    console.log('[cevs] 🔄 路径完成，自动返程');
+    tcpServer.sendToAll('!PATH:2#');
+    state.updateRobot({ status: 'moving' });
+  });
+
   // 语音指令: STT → LLM → 执行
   initVoiceService();
   onVoiceCommand((cmd, text) => {
-    switch (cmd.cmd) {
-      case 'pick':
-        console.log(`[voice] → pick: ${cmd.goods}`);
-        pickDirect(cmd.goods);
-        break;
-      case 'nav':
-        console.log(`[voice] → nav: (${cmd.x}, ${cmd.y})`);
-        startTagNav([{ x: cmd.x || 0, y: cmd.y || 0 }]);
-        state.updateRobot({ status: 'moving' });
-        break;
-      case 'stop':
-        console.log('[voice] → stop');
-        navApi.stop();
-        state.updateRobot({ status: 'idle' });
-        break;
-      case 'return':
-        console.log('[voice] → return to origin');
-        startTagNav([{ x: 0, y: 0 }]);
-        state.updateRobot({ status: 'moving' });
-        break;
-      default:
-        console.log(`[voice] Ignored: "${text}" → ${JSON.stringify(cmd)}`);
-    }
-    broadcast({ type: 'voice_status', text, status: 'executed', cmd });
+    executeCommand(cmd, text);
   });
 
   tcpServer.onConnected = async (sock) => {

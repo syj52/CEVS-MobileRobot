@@ -140,3 +140,32 @@ button.danger:hover { background: #991b1b; }
 ::-webkit-scrollbar-track { background: #0a0e14; }
 ::-webkit-scrollbar-thumb { background: #2a3a50; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #3b4a60; }
+
+/* Chat panel */
+#panel-chat { display: none; flex-direction: column; }
+#panel-chat.active { display: flex; }
+#chat-messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+#chat-bottom-bar { border-top: 1px solid #1e2d45; background: #0a0e14; padding: 10px 20px; }
+#chat-tts-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+#chat-input-row { display: flex; gap: 8px; }
+#chat-input { flex: 1; background: #1a2332; border: 1px solid #2a3a50; color: #e8edf4; padding: 10px 14px; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
+#chat-input:focus { border-color: #3b82f6; }
+#chat-send { padding: 10px 22px; border-radius: 8px; font-size: 14px; font-weight: 600; background: #3b82f6; border: none; color: #fff; cursor: pointer; }
+#chat-send:hover { background: #2563eb; }
+#chat-send:active { background: #1d4ed8; }
+
+/* Chat message bubbles */
+.chat-msg { display: flex; flex-direction: column; max-width: 80%; animation: chatFadeIn 0.25s ease-out; }
+.chat-msg-user { align-self: flex-end; align-items: flex-end; }
+.chat-msg-ai { align-self: flex-start; align-items: flex-start; }
+.chat-msg-system { align-self: center; font-size: 12px; color: #5a6a80; background: rgba(255,255,255,0.04); padding: 6px 16px; border-radius: 12px; text-align: center; max-width: 90%; }
+.chat-msg-bubble { padding: 10px 16px; border-radius: 16px; font-size: 14px; line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
+.chat-msg-user .chat-msg-bubble { background: #1e3a5f; color: #e8edf4; border-bottom-right-radius: 4px; }
+.chat-msg-ai .chat-msg-bubble { background: #1a2332; border: 1px solid #2a3a50; color: #e8edf4; border-bottom-left-radius: 4px; }
+.chat-msg-label { font-size: 11px; color: #5a6a80; margin: 4px 8px; }
+.chat-msg-system .chat-msg-label { display: none; }
+@keyframes chatFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Chat typing indicator */
+.chat-dots { display: inline-block; animation: chatDots 1.2s steps(3) infinite; }
+@keyframes chatDots { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }

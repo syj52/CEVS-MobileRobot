@@ -12,3 +12,8 @@ error.txt
 .DS_Store
 Thumbs.db
 .gitignore_temp
+__pycache__/
+*.pyc
+*.pyo
+.env
+.local

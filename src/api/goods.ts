@@ -23,6 +23,7 @@ export interface Goods {
   tag?: number;       // 关联的 AprilTag ID (可选, 用于精确定位)
   shelf?: string;     // 货架编号 (显示用)
   dropChannel?: number; // 投货通道号 (通知投货芯片用)
+  trajectoryId?: string; // 到位后发送的固定轨迹 ID (如 "shelf_a", "dock")
 }
 
 // ─── 取货订单状态 ───────────────────────────────────────────
@@ -49,6 +50,10 @@ let currentOrder: PickOrder | null = null;
 // ─── 投货通知回调 (由 main.ts 注入, 通过 TCP 发到 ESP32→投货芯片) ──
 let dropNotifier: ((channel: number) => void) | null = null;
 export function setDropNotifier(fn: (channel: number) => void) { dropNotifier = fn; }
+
+// ─── 固定轨迹通知回调 (到位后发 $TRAJ:<id> 到 ESP32→STM32) ──
+let trajectoryNotifier: ((trajectoryId: string) => void) | null = null;
+export function setTrajectoryNotifier(fn: (trajectoryId: string) => void) { trajectoryNotifier = fn; }
 
 // ─── 到位检测: tagNav 完成后触发投货 ────────────────────────
 let arrivalCheckTimer: ReturnType<typeof setInterval> | null = null;
@@ -78,17 +83,26 @@ function startArrivalWatch(goods: Goods) {
 function triggerDrop(goods: Goods) {
   if (!currentOrder) return;
   currentOrder.status = 'dropping';
-  currentOrder.message = `正在投放货物...`;
+  currentOrder.message = `正在执行...`;
 
-  const channel = goods.dropChannel ?? 0;
-  console.log(`[goods] 📦 投货通道 ${channel}: ${goods.name}`);
-  if (dropNotifier) {
-    dropNotifier(channel);
-  } else {
-    console.warn('[goods] 投货通知未配置 (dropNotifier=null)');
+  // 固定轨迹: 到位后发给 STM32 走预定路径
+  if (goods.trajectoryId && trajectoryNotifier) {
+    console.log(`[goods] 🛤️ 固定轨迹 ${goods.trajectoryId}: ${goods.name}`);
+    trajectoryNotifier(goods.trajectoryId);
   }
 
-  // 假定投货动作 3 秒完成 (投货芯片实际应回传确认)
+  // 投货通道
+  const channel = goods.dropChannel ?? 0;
+  if (channel > 0) {
+    console.log(`[goods] 📦 投货通道 ${channel}: ${goods.name}`);
+    if (dropNotifier) {
+      dropNotifier(channel);
+    } else {
+      console.warn('[goods] 投货通知未配置');
+    }
+  }
+
+  // 假定动作 3 秒完成
   setTimeout(() => {
     if (currentOrder && currentOrder.goodsId === goods.id) {
       currentOrder.status = 'done';
@@ -116,9 +130,9 @@ export const goodsApi = {
 
   /** 增加/更新货物 */
   upsert(req: Request, res: Response) {
-    const { id, name, x, y, tag, shelf, dropChannel } = req.body || {};
+    const { id, name, x, y, tag, shelf, dropChannel, trajectoryId } = req.body || {};
     if (!id || !name) return res.status(400).json({ error: 'id 和 name 必填' });
-    GOODS[id] = { id, name, x: x ?? 0, y: y ?? 0, tag, shelf, dropChannel };
+    GOODS[id] = { id, name, x: x ?? 0, y: y ?? 0, tag, shelf, dropChannel, trajectoryId };
     console.log(`[goods] 货物登记: ${id} = ${name} @ (${x},${y})`);
     res.json(GOODS[id]);
   },

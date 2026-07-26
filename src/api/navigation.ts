@@ -9,6 +9,8 @@ let sendToAll: ((msg: string) => void) | null = null;
 export function setTcpSend(fn: (msg: string) => void) { sendToAll = fn; }
 
 let patrolPoints: [number, number][] = [];
+let s_pathDoneCallback: (() => void) | null = null;
+export function onPathDone(fn: () => void) { s_pathDoneCallback = fn; }
 let patrolIndex = 0;
 
 /* ── Last nav target — used by position correction loop ───────── */
@@ -69,13 +71,44 @@ export const navApi = {
   /** Handle EXEC: responses from STM32/ESP32 */
   handleEspResponse(line: string) {
     if (line.startsWith('EXEC:NAV_DONE')) {
+      // 解析里程计数据更新位置: d=距离(mm), a=角度变化(°)
+      const dMatch = line.match(/d=([-\d.]+)/);
+      const aMatch = line.match(/a=([-\d.]+)/);
+      if (dMatch) {
+        const dMm = parseFloat(dMatch[1]);
+        const aDeg = aMatch ? parseFloat(aMatch[1]) : 0;
+        const pos = state.robot.position;
+        const hRad = pos.angle;
+        const dM = dMm / 1000;
+        const newX = pos.x + dM * Math.cos(hRad);
+        const newY = pos.y + dM * Math.sin(hRad);
+        const newAngle = pos.angle + aDeg * Math.PI / 180;
+        state.updateRobot({ position: { x: newX, y: newY, angle: newAngle } });
+        lastTagPose.x = newX; lastTagPose.y = newY;
+        lastTagPose.angle = newAngle; lastTagPose.ts = Date.now();
+        console.log(`[nav] NAV_DONE: d=${dMm}mm a=${aDeg}° → (${newX.toFixed(3)},${newY.toFixed(3)})@${(newAngle*180/Math.PI).toFixed(1)}°`);
+      }
       const consumed = tagNavExecDone();
       if (!consumed) state.updateRobot({ status: 'idle' });
     } else if (line.startsWith('EXEC:NAV_TIMEOUT') || line.startsWith('EXEC:NAV_CANCEL')) {
       state.updateRobot({ status: 'idle' });
+    } else if (line.startsWith('EXEC:PATH_WAIT')) {
+      state.updateRobot({ status: 'idle' });
+      console.log('[nav] PATH_WAIT — arrived, auto-continue in 2s');
+      if (sendToAll) {
+        setTimeout(() => {
+          if (sendToAll) {
+            sendToAll('!PATH:0#');
+            console.log('[nav] 🔄 PATH continue sent');
+            state.updateRobot({ status: 'moving' });
+          }
+        }, 2000);
+      }
+    } else if (line.startsWith('EXEC:PATH_DONE')) {
+      state.updateRobot({ status: 'idle' });
+      console.log('[nav] PATH_DONE — trajectory complete');
+      if (s_pathDoneCallback) s_pathDoneCallback();
     }
-    // EXEC:NAV_S → acknowledged, no action needed (status already 'moving')
-    // Old EXEC:DONE / EXEC:A → ignored (STM32 no longer sends these)
   },
 
   handleNav(req: Request, res: Response) {

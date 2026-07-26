@@ -60,6 +60,7 @@ document.querySelectorAll('.tab').forEach(el => {
     if (currentTab === 'goods') loadGoods();
     if (currentTab === 'calib') loadCalibStatus();
     if (currentTab === 'logs') loadEvents();
+    if (currentTab === 'chat') setTimeout(() => (document.getElementById('chat-input') as HTMLInputElement)?.focus(), 100);
   });
 });
 
@@ -423,19 +424,44 @@ function connectWs() {
       }
       if (msg.type === 'voice_status' && msg.text) {
         const status = msg.status;
-        if (status === 'recognized' || status === 'executed') {
+        const cmd = msg.cmd || {};
+        if (status === 'recognized') {
           logger.llm(`🎤 ${msg.text}`);
-          const cmd = msg.cmd;
-          if (cmd && cmd.cmd && cmd.cmd !== 'unknown') {
+          addChatMessage('system', `🎤 识别到: "${msg.text}"`);
+          if (cmd.reply) {
+            addChatMessage('ai', cmd.reply);
+          }
+          if (cmd.cmd && cmd.cmd !== 'unknown' && cmd.cmd !== 'none') {
             const actionMap: Record<string, string> = {
               pick: `📦 取货: ${cmd.goods || ''}`,
+              goto: `📍 导航到: ${cmd.target || ''}`,
+              nav: '🧭 导航',
+              stop: '🛑 停止',
+              return: '🏠 返回原点',
+            };
+            addChatMessage('system', `✅ ${actionMap[cmd.cmd] || cmd.cmd}`);
+            logger.llmReply(`${actionMap[cmd.cmd] || cmd.cmd}: ${cmd.reply || ''}`);
+          } else if (cmd.reply) {
+            logger.llmReply(`💬 ${cmd.reply}`);
+          }
+        } else if (status === 'executed') {
+          if (cmd.cmd && cmd.cmd !== 'unknown' && cmd.cmd !== 'none') {
+            const actionMap: Record<string, string> = {
+              pick: `📦 取货: ${cmd.goods || ''}`,
+              goto: `📍 导航到: ${cmd.target || ''}`,
               nav: `🧭 导航: (${cmd.x?.toFixed(1) ?? '?'}, ${cmd.y?.toFixed(1) ?? '?'})`,
               stop: '🛑 停止',
               return: '🏠 返回原点',
             };
             logger.llmReply(`${actionMap[cmd.cmd] || cmd.cmd}`);
-          } else {
-            logger.llmReply('(未识别到指令)');
+          }
+          // 语音触发的 goto/nav 也在地图画线
+          if ((cmd.cmd === 'goto' || cmd.cmd === 'nav') && cmd.x != null) {
+            goalMarker = { x: cmd.x, y: cmd.y };
+            const robotPos = robot.position;
+            navPath = generatePath(robotPos.x, robotPos.y, cmd.x, cmd.y);
+            navPath = [[robotPos.x, robotPos.y], ...navPath];
+            drawMap();
           }
         }
       }
@@ -1013,26 +1039,118 @@ mapCanvas.addEventListener('click', async (e) => {
   drawMap();
 });
 
-// ─── LLM ─────────────────────────────────────────────────────
-document.getElementById('llm-send')!.addEventListener('click', async () => {
-  const input = document.getElementById('llm-input') as HTMLInputElement;
+// ─── Chat panel ──────────────────────────────────────────────
+const chatMessagesContainer = document.getElementById('chat-messages')!;
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function addChatMessage(type: 'user' | 'ai' | 'system', content: string) {
+  const div = document.createElement('div');
+  div.className = `chat-msg chat-msg-${type}`;
+  if (type === 'user') {
+    div.innerHTML = `<div class="chat-msg-label">你</div><div class="chat-msg-bubble">${escapeHtml(content)}</div>`;
+  } else if (type === 'ai') {
+    div.innerHTML = `<div class="chat-msg-label">小E</div><div class="chat-msg-bubble">${escapeHtml(content)}</div>`;
+  } else {
+    div.innerHTML = `<div class="chat-msg-system">${escapeHtml(content)}</div>`;
+  }
+  chatMessagesContainer.appendChild(div);
+  while (chatMessagesContainer.children.length > 200) {
+    chatMessagesContainer.removeChild(chatMessagesContainer.firstChild!);
+  }
+  chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+}
+
+// Sync TTS volume between chat and control panel
+document.getElementById('chat-tts-volume')!.addEventListener('input', function () {
+  (document.getElementById('tts-volume') as HTMLInputElement).value = this.value;
+  document.getElementById('chat-tts-vol-val')!.textContent = this.value + '%';
+  document.getElementById('tts-vol-val')!.textContent = this.value + '%';
+});
+document.getElementById('tts-volume')!.addEventListener('input', function () {
+  (document.getElementById('chat-tts-volume') as HTMLInputElement).value = this.value;
+  document.getElementById('chat-tts-vol-val')!.textContent = this.value + '%';
+  document.getElementById('tts-vol-val')!.textContent = this.value + '%';
+});
+
+// Chat send handler
+document.getElementById('chat-send')!.addEventListener('click', async () => {
+  const input = document.getElementById('chat-input') as HTMLInputElement;
   const text = input.value.trim();
   if (!text) return;
-  logger.llm(text);
   input.value = '';
+  addChatMessage('user', text);
+  logger.llm(text);
+
+  const ttsEnabled = (document.getElementById('chat-tts-toggle') as HTMLInputElement).checked;
+
   try {
+    // Show typing indicator
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'chat-msg chat-msg-ai';
+    typingDiv.innerHTML = `<div class="chat-msg-label">小E</div><div class="chat-msg-bubble" style="color:#5a6a80">思考中<span class="chat-dots">...</span></div>`;
+    chatMessagesContainer.appendChild(typingDiv);
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+
     const resp = await fetch(`${API}/llm/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: text, session_id: 'default' }),
     });
     const data = await resp.json();
-    logger.llmReply(data.reply || '(空回复)');
+
+    // Remove typing indicator
+    typingDiv.remove();
+
+    const reply = data.reply || '(没有回复)';
+    addChatMessage('ai', reply);
+    logger.llmReply(reply);
+
+    // TTS: 和手动"语音测试"完全相同的调用方式
+    if (ttsEnabled && reply) {
+      const vol = parseInt((document.getElementById('chat-tts-volume') as HTMLInputElement).value) / 100;
+      fetch(`${API}/tts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: reply, volume: vol }),
+      }).then(r => r.json()).then(d => {
+        if (d.ok) addChatMessage('system', '🔊 已播报');
+        else console.warn('[chat] TTS fail:', d.note);
+      }).catch(e => console.warn('[chat] TTS error:', e));
+    }
+
+    if (data.executed) {
+      const actionStr = data.cmd?.cmd === 'pick' ? `📦 取货: ${data.cmd.goods}` :
+                        data.cmd?.cmd === 'goto' ? `📍 导航到: ${data.cmd.target}` :
+                        data.cmd?.cmd === 'nav' ? `🧭 导航到 (${data.cmd.x},${data.cmd.y})` :
+                        data.cmd?.cmd === 'stop' ? '🛑 停止' :
+                        data.cmd?.cmd === 'return' ? '🏠 返回原点' : '';
+      if (actionStr) {
+        addChatMessage('system', `✅ ${actionStr}`);
+        logger.status(`✅ ${actionStr}`);
+      }
+      // 有坐标 => 在地图画导航线
+      if ((data.cmd?.cmd === 'goto' || data.cmd?.cmd === 'nav') && data.cmd?.x != null) {
+        goalMarker = { x: data.cmd.x, y: data.cmd.y };
+        const robotPos = robot.position;
+        navPath = generatePath(robotPos.x, robotPos.y, data.cmd.x, data.cmd.y);
+        navPath = [[robotPos.x, robotPos.y], ...navPath];
+        drawMap();
+      }
+    }
   } catch (e) {
+    addChatMessage('ai', `嗯？发送失败了：${(e as Error).message}，再试一次吧～`);
     logger.llmReply(`请求失败: ${(e as Error).message}`);
   }
 });
-(document.getElementById('llm-input') as HTMLInputElement).addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') (document.getElementById('llm-send') as HTMLButtonElement).click();
+
+(document.getElementById('chat-input') as HTMLInputElement).addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') (document.getElementById('chat-send') as HTMLButtonElement).click();
+});
+
+// Chat clear
+document.getElementById('chat-clear')!.addEventListener('click', () => {
+  chatMessagesContainer.innerHTML = '<div class="chat-msg-system">💬 对话已清空</div>';
 });
 
 // ─── TTS test ────────────────────────────────────────────────
@@ -1266,6 +1384,49 @@ document.getElementById('btn-patrol-arrive')!.addEventListener('click', async ()
     }
   } catch (e) {
     document.getElementById('patrol-status')!.textContent = '请求失败: ' + (e as Error).message;
+  }
+});
+
+
+// 🛤️ 固定路径
+document.querySelectorAll(".path-btn").forEach(el => {
+  el.addEventListener("click", async () => {
+    const n = el.getAttribute("data-path");
+    document.getElementById("path-status")!.textContent = "路径" + n + " 启动中...";
+    try {
+      const r = await fetch(`${API}/path/${n}`, { method: "POST" });
+      const d = await r.json();
+      document.getElementById("path-status")!.textContent = d.ok ? "✅ 路径" + n + " 已启动" : "❌ 失败";
+    } catch(e) {
+      document.getElementById("path-status")!.textContent = "❌ 请求失败";
+    }
+  });
+});
+document.getElementById("btn-path-wait")!.addEventListener("click", async () => {
+  try {
+    const r = await fetch(`${API}/path/0`, { method: "POST" });
+    const d = await r.json();
+    document.getElementById("path-status")!.textContent = d.ok ? "⏸ 已暂停" : "❌ 失败";
+  } catch(e) {
+    document.getElementById("path-status")!.textContent = "❌ 请求失败";
+  }
+});
+document.getElementById("btn-path-return")!.addEventListener("click", async () => {
+  try {
+    const r = await fetch(`${API}/path/0`, { method: "POST" });
+    const d = await r.json();
+    document.getElementById("path-status")!.textContent = d.ok ? "↩ 返程中" : "❌ 失败";
+  } catch(e) {
+    document.getElementById("path-status")!.textContent = "❌ 请求失败";
+  }
+});
+
+document.getElementById("btn-path-stop")!.addEventListener("click", async () => {
+  try {
+    await fetch(`${API}/stop`, { method: "POST" });
+    document.getElementById("path-status")!.textContent = "🛑 已停止";
+  } catch(e) {
+    document.getElementById("path-status")!.textContent = "❌ 请求失败";
   }
 });
 

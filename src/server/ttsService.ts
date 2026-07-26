@@ -1,111 +1,129 @@
 /**
- * ttsService.ts — Text-to-Speech: generates PCM audio and sends to ESP32
+ * ttsService.ts — Text-to-Speech: Windows SAPI → PCM → ESP32
  *
- * Uses edge-tts (Python CLI) for high-quality Chinese TTS.
- * Install: pip install edge-tts
- *
- * Output: 16kHz 16-bit mono PCM (matching ESP32 I2S speaker format).
+ * 使用 Windows 原生 SAPI 离线合成中文语音，零网络依赖。
+ * 每条 TTS 发送后强制冷却，防止 TCP 粘包导致 ESP32 行缓冲错乱。
  */
 import { spawn } from 'child_process';
-import { join } from 'path';
-import { execSync } from 'child_process';
 import { TcpServer } from './tcp.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const SAMPLE_RATE = 16000;
+const TMP_PY = path.join(os.tmpdir(), `cevs_tts.py`);
 
-function findEdgeTts(): string {
-  for (const py of ['python', 'python3']) {
-    try {
-      const out = execSync(`"${py}" -m edge_tts --help 2>&1`, { timeout: 3000, stdio: 'pipe' });
-      if (out.length > 0) return `${py} -m edge_tts`;
-    } catch { /* not found */ }
-  }
-  return '';
+// ─── TTS 冷却（防止声反馈 + TCP 粘包）─────────────────────────
+let _coolUntil = 0;
+/** TTS 是否正在冷却中（麦克风输入在此期间被忽略） */
+export function isSpeaking(): boolean {
+  return Date.now() < _coolUntil;
 }
 
-const EDGE_TTS_CMD = findEdgeTts();
+const PY_SCRIPT = `
+import sys, os, tempfile, time
+wav = os.path.join(tempfile.gettempdir(), 'cevs_tts_' + str(int(time.time()*1000)) + '.wav')
+try:
+    import win32com.client
+    voice = win32com.client.Dispatch('SAPI.SpVoice')
+    stream = win32com.client.Dispatch('SAPI.SpFileStream')
+    stream.Open(wav, 3, False)
+    voice.AudioOutputStream = stream
+    voice.Speak(sys.argv[1], 0)
+    stream.Close()
+    with open(wav, 'rb') as f:
+        sys.stdout.buffer.write(f.read())
+except Exception as e:
+    sys.stderr.write('SAPI_ERROR:' + str(e))
+    sys.exit(1)
+finally:
+    try: os.remove(wav)
+    except: pass
+`;
 
-export function getTtsStatus() {
-  return { ready: !!EDGE_TTS_CMD, engine: EDGE_TTS_CMD || '(not found: pip install edge-tts)' };
-}
+try { fs.writeFileSync(TMP_PY, PY_SCRIPT, 'utf-8'); } catch {}
 
 async function generatePcm(text: string): Promise<Buffer | null> {
-  if (!EDGE_TTS_CMD) {
-    console.warn('[tts] edge-tts not available — install: pip install edge-tts');
-    return null;
-  }
   return new Promise((resolve) => {
-    /* edge-tts 默认输出 MP3，需要转成 16kHz 16-bit mono PCM。
-       --format 在旧版本 edge-tts 中不支持，所以用 ffmpeg 转换。 */
-    const [cmd, ...args] = EDGE_TTS_CMD.split(' ');
-    args.push('--text', text, '--voice', 'zh-CN-XiaoxiaoNeural', '--rate', '+0%',
-              '--write-media', '-', '--write-subtitles', 'none');
-    const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-
-    /* 用 ffmpeg 将 edge-tts 的输出转为 16kHz 16-bit mono PCM */
-    const ffmpeg = spawn('ffmpeg', [
-      '-i', 'pipe:0',
-      '-f', 's16le',
-      '-ar', String(SAMPLE_RATE),
-      '-ac', '1',
-      '-loglevel', 'error',
-      'pipe:1',
-    ], { stdio: ['pipe', 'pipe', 'pipe'] });
-
-    proc.stdout.pipe(ffmpeg.stdin);
-
-    const pcmChunks: Buffer[] = [];
-    ffmpeg.stdout.on('data', (chunk: Buffer) => pcmChunks.push(chunk));
-
-    let ffmpegErr = '';
-    ffmpeg.stderr.on('data', (d: Buffer) => { ffmpegErr += d.toString(); });
-
-    proc.stderr.on('data', (d: Buffer) => {
-      const s = d.toString().trim();
-      if (s) console.log(`[tts:edge] ${s}`);
-    });
-    proc.on('error', () => { resolve(null); });
-
-    ffmpeg.on('close', (code) => {
-      if (code !== 0 || pcmChunks.length === 0) {
-        console.warn(`[tts] ffmpeg exit=${code}: ${ffmpegErr.trim()}`);
+    const proc = spawn('python', [TMP_PY, text], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const wavChunks: Buffer[] = [];
+    proc.stdout.on('data', (c: Buffer) => wavChunks.push(c));
+    let errMsg = '';
+    proc.stderr.on('data', (c: Buffer) => { errMsg += c.toString(); });
+    proc.on('close', (code) => {
+      if (code !== 0 || wavChunks.length === 0) {
+        if (errMsg) console.warn(`[tts:sapi] ${errMsg.trim()}`);
         resolve(null);
         return;
       }
-      const pcm = Buffer.concat(pcmChunks);
-      console.log(`[tts] PCM: ${pcm.length}B (${(pcm.length / SAMPLE_RATE / 2).toFixed(1)}s @ ${SAMPLE_RATE}Hz)`);
-      resolve(pcm);
+      const wav = Buffer.concat(wavChunks);
+      const ff = spawn('ffmpeg', [
+        '-f', 'wav', '-i', 'pipe:0',
+        '-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', '1',
+        '-loglevel', 'error', 'pipe:1',
+      ], { stdio: ['pipe', 'pipe', 'pipe'] });
+      ff.stdin.write(wav);
+      ff.stdin.end();
+      const pcm: Buffer[] = [];
+      ff.stdout.on('data', (c: Buffer) => pcm.push(c));
+      let ferr = '';
+      ff.stderr.on('data', (c: Buffer) => { ferr += c.toString(); });
+      ff.on('close', (fc) => {
+        if (fc !== 0 || pcm.length === 0) {
+          console.warn(`[tts] ffmpeg: ${ferr.trim()}`);
+          resolve(null);
+          return;
+        }
+        resolve(Buffer.concat(pcm));
+      });
     });
-
-    setTimeout(() => {
-      if (!proc.killed) { proc.kill(); ffmpeg.kill(); resolve(null); }
-    }, 20000);
+    setTimeout(() => { if (!proc.killed) { proc.kill(); resolve(null); } }, 15000);
   });
 }
+
+// ─── 发送到 ESP32 ─────────────────────────────────────────
 
 let tcpServer: TcpServer | null = null;
 export function setTcpServer(srv: TcpServer) { tcpServer = srv; }
 
-/** Scale int16 PCM by volume factor (0.0–1.0) */
 function scaleVolume(pcm: Buffer, vol: number): Buffer {
   if (vol >= 1.0) return pcm;
   const out = Buffer.alloc(pcm.length);
   for (let i = 0; i < pcm.length; i += 2) {
     const s = pcm.readInt16LE(i);
-    const scaled = Math.round(s * vol);
-    out.writeInt16LE(Math.max(-32768, Math.min(32767, scaled)), i);
+    out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(s * vol))), i);
   }
   return out;
 }
 
 export async function speak(text: string, volume = 1.0): Promise<boolean> {
-  if (!tcpServer) { console.warn('[tts] TCP server not set'); return false; }
+  if (!tcpServer) { console.warn('[tts] TCP not set'); return false; }
+  // 立即设冷却，防止 PCM 生成+ESP32缓存排空期间的麦克风音频被处理
+  _coolUntil = Date.now() + 12000;
   const pcm = await generatePcm(text);
   if (!pcm || pcm.length === 0) return false;
   const out = scaleVolume(pcm, volume);
-  const tag = (volume < 1.0) ? ` @ ${Math.round(volume * 100)}%` : '';
-  const header = Buffer.from(`$TTS:${out.length}\r\n`);
-  tcpServer.sendToAllRaw(Buffer.concat([header, out]));
-  console.log(`[tts] Sent ${out.length}B TTS audio to ESP32${tag}`);
+
+  // 分块发送：先发 $TTS: 头，再发 4KB 一块 + 10ms 间隔
+  // 防止 SDIO 缓冲溢出 crash (assert sdio_rx_get_buffer)
+  const CHUNK = 4096;
+  tcpServer.sendToAllRaw(Buffer.from(`$TTS:${out.length}\r\n`));
+
+  let offset = 0;
+  while (offset < out.length) {
+    const end = Math.min(offset + CHUNK, out.length);
+    tcpServer.sendToAllRaw(out.subarray(offset, end));
+    offset = end;
+    if (offset < out.length) await new Promise(r => setTimeout(r, 10));
+  }
+
+  console.log(`[tts] Sent ${out.length}B in ${Math.ceil(out.length/CHUNK)} chunks`);
+
+  // 冷却：播放时长 + 8s
+  _coolUntil = Date.now() + Math.round(out.length / 32) + 8000;
   return true;
+}
+
+export function getTtsStatus() {
+  return { ready: true, engine: 'Windows SAPI (离线)' };
 }

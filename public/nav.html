@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>CEVS 导航</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #0f1419; color: #e8edf4; min-height: 100vh; padding: 16px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .status-bar { font-size: 13px; color: #7a8ba0; margin-bottom: 16px; }
+  .section-title { font-size: 14px; color: #7a8ba0; margin: 16px 0 8px; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn {
+    background: #1a2332; border: 1px solid #2a3a50; border-radius: 12px;
+    padding: 20px 12px; text-align: center; cursor: pointer; transition: all 0.15s;
+    user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  .btn:active { background: #2a3a50; transform: scale(0.96); }
+  .btn .icon { font-size: 28px; display: block; margin-bottom: 6px; }
+  .btn .label { font-size: 14px; font-weight: 600; }
+  .btn .desc { font-size: 11px; color: #5a6a80; margin-top: 2px; }
+  .btn.path { border-color: #3b82f6; }
+  .btn.path .label { color: #93c5fd; }
+  .btn.poi { border-color: #22c55e; }
+  .btn.poi .label { color: #86efac; }
+  .btn.stop { border-color: #ef4444; }
+  .btn.stop .label { color: #fca5a5; }
+  .btn.full { grid-column: 1 / -1; }
+  .btn:disabled { opacity: 0.4; }
+  .full-row { grid-column: 1 / -1; }
+  .status-msg {
+    margin-top: 12px; padding: 12px; border-radius: 8px; font-size: 14px; text-align: center; display: none;
+  }
+  .status-msg.show { display: block; }
+  .status-msg.ok { background: rgba(34,197,94,0.15); border: 1px solid #22c55e; color: #86efac; }
+  .status-msg.err { background: rgba(239,68,68,0.15); border: 1px solid #ef4444; color: #fca5a5; }
+  .status-msg.busy { background: rgba(59,130,246,0.15); border: 1px solid #3b82f6; color: #93c5fd; }
+  .pos-display { font-family: monospace; font-size: 13px; color: #22c55e; }
+</style>
+</head>
+<body>
+  <h1>🚚 CEVS 移动机器人</h1>
+  <div class="status-bar">状态: <span id="robot-status">载入中...</span> · <span id="robot-pos">--</span></div>
+
+  <div class="section-title">📍 固定路径</div>
+  <div class="grid" id="path-btns">
+    <div class="btn path" data-path="1"><span class="icon">➡️</span><div class="label">路径1</div><div class="desc">短距往返</div></div>
+    <div class="btn path" data-path="2"><span class="icon">🏃</span><div class="label">路径2</div><div class="desc">长距往返</div></div>
+    <div class="btn path" data-path="3"><span class="icon">↩️</span><div class="label">路径3</div><div class="desc">弯绕路线</div></div>
+    <div class="btn path" data-path="4"><span class="icon">➡️</span><div class="label">路径4</div><div class="desc">同3远距</div></div>
+    <div class="btn path" data-path="5"><span class="icon">🏃</span><div class="label">路径5</div><div class="desc">同3最远</div></div>
+    <div class="btn path" data-path="6"><span class="icon">↩️</span><div class="label">路径6</div><div class="desc">左转L型</div></div>
+  </div>
+
+  <div class="status-msg" id="status-msg"></div>
+
+  <div class="section-title">📍 已知地点</div>
+  <div class="grid" id="poi-btns">载入中...</div>
+
+  <div style="margin-top:16px;display:flex;gap:8px">
+    <div class="btn stop" id="btn-stop" style="flex:1">
+      <div class="label">🛑 停止</div>
+    </div>
+    <div class="btn stop" id="btn-return" style="flex:1">
+      <div class="label">🏠 回原点</div>
+    </div>
+  </div>
+
+<script>
+const API = location.origin + '/api';
+const msg = document.getElementById('status-msg');
+
+function showMsg(text, type) {
+  msg.textContent = text;
+  msg.className = 'status-msg show ' + (type || 'ok');
+  setTimeout(() => { if (msg.textContent === text) msg.className = 'status-msg'; }, 3000);
+}
+
+async function sendApi(url, body) {
+  try {
+    const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined });
+    const d = await r.json();
+    if (d.ok || d.ok === undefined) return d;
+    showMsg('❌ ' + (d.error || '失败'), 'err');
+  } catch(e) { showMsg('❌ 请求失败', 'err'); }
+}
+
+// Path buttons
+document.querySelectorAll('[data-path]').forEach(el => {
+  el.addEventListener('click', async () => {
+    const n = el.dataset.path;
+    showMsg('路径' + n + ' 启动中...', 'busy');
+    await sendApi(API + '/path/' + n);
+    showMsg('✅ 路径' + n + ' 已启动');
+  });
+});
+
+// Stop
+document.getElementById('btn-stop').addEventListener('click', async () => {
+  await sendApi(API + '/stop');
+  showMsg('🛑 已停止');
+});
+
+// Return
+document.getElementById('btn-return').addEventListener('click', async () => {
+  await sendApi(API + '/nav', { x: 0, y: 0 });
+  showMsg('🏠 正在返回原点', 'busy');
+});
+
+// Load POIs and status
+async function loadPois() {
+  try {
+    const r = await fetch(API + '/poi');
+    const pois = await r.json();
+    const container = document.getElementById('poi-btns');
+    if (pois.length === 0) {
+      container.innerHTML = '<div style="color:#5a6a80;grid-column:1/-1;text-align:center;padding:20px">暂无地点</div>';
+      return;
+    }
+    container.innerHTML = pois.filter(p => p.name !== 'start').map(p => `
+      <div class="btn poi" data-name="${p.name}">
+        <span class="icon">📍</span>
+        <div class="label">${p.name}</div>
+        <div class="desc">${p.description || `(${p.coord_x}, ${p.coord_y})`}</div>
+      </div>
+    `).join('');
+    container.querySelectorAll('[data-name]').forEach(el => {
+      el.addEventListener('click', async () => {
+        showMsg('导航到 ' + el.dataset.name + '...', 'busy');
+        await sendApi(API + '/llm/chat', { message: '带我去' + el.dataset.name, session_id: 'nav-page' });
+        showMsg('✅ 已出发去 ' + el.dataset.name);
+      });
+    });
+  } catch(e) { document.getElementById('poi-btns').innerHTML = '<div style="color:#5a6a80;padding:20px">加载失败</div>'; }
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch(API + '/robot');
+    const d = await r.json();
+    document.getElementById('robot-status').textContent = d.status || '--';
+    document.getElementById('robot-pos').textContent = `(${d.position?.x?.toFixed(2) ?? '?'}, ${d.position?.y?.toFixed(2) ?? '?'})`;
+  } catch(e) { document.getElementById('robot-status').textContent = '离线'; }
+}
+
+loadPois();
+loadStatus();
+setInterval(loadStatus, 3000);
+</script>
+</body>
+</html>

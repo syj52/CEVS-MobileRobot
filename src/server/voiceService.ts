@@ -13,33 +13,27 @@
  *   见 https://help.aliyun.com/zh/model-studio/get-api-key
  */
 import { broadcast } from './websocket.js';
+import { speak, isSpeaking } from './ttsService.js';
+import { state } from '../state.js';
+import { buildKnowledgeContext } from './knowledgeBase.js';
 
 // ─── Config ────────────────────────────────────────────────
-const LLM_MODEL = 'qwen2.5:7b';
-const OLLAMA_URL = 'http://localhost:11434/api/chat';
-
-const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || '';
-const WORKSPACE_ID = process.env.DASHSCOPE_WORKSPACE_ID || '';
-const DASHSCOPE_URL = `https://${WORKSPACE_ID}.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`;
+// DashScope 配置从 dashscope.ts 统一加载（env → CSV）
+import { getApiKey, getDashScopeUrl, chatCompletion, getStatus } from './dashscope.js';
 
 export function getVoiceStatus() {
-  const ok = !!DASHSCOPE_API_KEY && !!WORKSPACE_ID;
-  return {
-    ready: ok,
-    error: ok ? '' : 'DASHSCOPE_API_KEY 或 WORKSPACE_ID 未配置',
-  };
+  const st = getStatus();
+  return { ready: st.stt.ready, error: st.stt.error };
 }
 
 export function initVoiceService() {
-  if (!DASHSCOPE_API_KEY) {
-    console.warn('[voice] ⚠ DASHSCOPE_API_KEY 未设置 — 语音识别不可用');
+  const st = getStatus();
+  if (st.stt.ready) {
+    console.log(`[voice] ✅ STT(DashScope) + LLM(豆包) 已就绪`);
+  } else {
+    console.warn(`[voice] ⚠ STT 不可用: ${st.stt.error}`);
   }
-  if (!WORKSPACE_ID) {
-    console.warn('[voice] ⚠ DASHSCOPE_WORKSPACE_ID 未设置 — 语音识别不可用');
-  }
-  if (DASHSCOPE_API_KEY && WORKSPACE_ID) {
-    console.log('[voice] ✅ Fun-ASR-Flash 就绪');
-  }
+  console.log(`[voice] LLM: ${st.llm.provider} / ${st.llm.model}`);
 }
 
 // ─── WAV header for raw PCM ─────────────────────────────────
@@ -69,10 +63,12 @@ async function transcribe(wavBuffer: Buffer): Promise<string> {
   const dataUri = `data:audio/wav;base64,${base64}`;
 
   try {
-    const resp = await fetch(DASHSCOPE_URL, {
+    const apiKey = getApiKey();
+    const url = `${getDashScopeUrl()}/services/aigc/multimodal-generation/generation`;
+    const resp = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${DASHSCOPE_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'X-DashScope-SSE': 'disable',
       },
@@ -105,44 +101,59 @@ async function transcribe(wavBuffer: Buffer): Promise<string> {
   }
 }
 
-// ─── LLM 意图解析 ────────────────────────────────────────────
-const SYSTEM_PROMPT = `你是一个仓库物流机器人的指令解析器。
-根据用户的语音输入，输出一个 JSON 指令。支持:
+// ─── LLM 意图解析（积极人格 + 回复 + 指令）─────────────────────
+const SYSTEM_PROMPT = `你是一个热情友好的仓库物流机器人指令解析器，名字叫"小E"。
 
-1. 取货: {"cmd":"pick","goods":"货物名或编号"}
-2. 导航: {"cmd":"nav","target":"位置描述","x":0,"y":0}
-3. 停止: {"cmd":"stop"}
-4. 返回: {"cmd":"return"}
-5. 未知: {"cmd":"unknown"}
+根据用户的语音输入，输出一个 JSON 对象，包含热情回复和指令。
 
-示例:
-"去A03货架取螺丝" → {"cmd":"pick","goods":"螺丝"}
-"到坐标3,2位置" → {"cmd":"nav","target":"(3,2)","x":3,"y":2}
-"停车" → {"cmd":"stop"}
-"回原点" → {"cmd":"return"}
+输出格式：
+{
+  "reply": "你对用户的热情回复，说明将执行的操作，使用语气词",
+  "cmd": "pick 或 goto 或 nav 或 stop 或 return 或 path 或 continue 或 unknown",
+  "goods": "货物名称（仅 cmd=pick 时）",
+  "target": "地点名称（仅 cmd=goto 时，提取用户说的点位名，如接待区、充电站）",
+  "x": 坐标X（仅 cmd=nav 时）,
+  "y": 坐标Y（仅 cmd=nav 时）
+  "path_id": 路径编号1-6（仅当 cmd=path 时）
+}
 
-只输出 JSON，不要额外解释。`;
+支持的命令：
+- 取货/去取 → cmd=pick，提取货物名称
+- 去某个地点 → cmd=goto，提取地点名称（如"接待区""充电站""A点"）
+- 导航/去某个位置 → cmd=nav，提取坐标
+- 停止/停车 → cmd=stop
+- 返回原点/回程 → cmd=return
+- 走路径/执行路径: cmd=path
+- 继续/返程/继续路径: cmd=continue，提取路径编号放入 path_id（1-6）
+- 其他聊天 → cmd=unknown（回复要友善热情）
+
+示例：
+"带我去接待区" → {"reply":"好的，带您去接待区。","cmd":"goto","target":"接待区"}
+"去A03货架取螺丝" → {"reply":"好的，去A03货架取螺丝。","cmd":"pick","goods":"螺丝"}
+"到坐标3,2" → {"reply":"好的，去坐标3,2位置。","cmd":"nav","x":3,"y":2}
+"停车" → {"reply":"收到，已停止。","cmd":"stop"}
+"你好" → {"reply":"你好，我是小E，有什么可以帮你的？","cmd":"unknown"}
+
+注意：只输出一个 JSON 对象，不要多余文字。回复控制在 20 字以内。`;
 
 async function llmParseCommand(text: string): Promise<any> {
   try {
-    const resp = await fetch(OLLAMA_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: text },
-        ],
-        stream: false,
-      }),
-    });
-    const data = await resp.json() as any;
-    const reply = data.message?.content || '';
+    // 注入 POI 信息
+    const poiList = state.pois.map(p =>
+      `  - ${p.name}${p.description ? ` (${p.description})` : ''}: 坐标(${p.coord_x}, ${p.coord_y})`
+    ).join('\n');
+    const poiContext = poiList ? `\n当前已知地点列表：\n${poiList}\n` : '';
+    const kbContext = buildKnowledgeContext(text);
+
+    const reply = await chatCompletion([
+      { role: 'system', content: SYSTEM_PROMPT + poiContext + kbContext },
+      { role: 'user', content: text },
+    ]);
     const jsonMatch = reply.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
     return { cmd: 'unknown', raw: reply };
   } catch (e) {
+    console.error('[voice] LLM 解析失败:', (e as Error).message);
     return { cmd: 'unknown', error: (e as Error).message };
   }
 }
@@ -155,6 +166,12 @@ export function onVoiceCommand(fn: VoiceCommandHandler) { cmdHandler = fn; }
 // ─── Public API ─────────────────────────────────────────────
 
 export async function processVoicePcm(pcm: Buffer, sampleRate = 16000) {
+  /* TTS 播放中 → 忽略语音（防止喇叭→麦克风→STT→LLM 死循环） */
+  if (isSpeaking()) {
+    console.log('[voice] ⏳ TTS 播放中，忽略语音输入');
+    return;
+  }
+
   const t0 = Date.now();
 
   /* Wrap raw PCM in WAV header, Base64, send to Fun-ASR-Flash */
@@ -181,4 +198,10 @@ export async function processVoicePcm(pcm: Buffer, sampleRate = 16000) {
   broadcast({ type: 'voice_status', text, status: 'recognized', cmd });
 
   if (cmdHandler) cmdHandler(cmd, text);
+
+  // 朗读 LLM 的热情回复
+  if (cmd.reply) {
+    console.log(`[voice] 🔊 TTS: "${cmd.reply}"`);
+    speak(cmd.reply, 0.7).catch(e => console.warn('[voice] TTS fail:', e));
+  }
 }

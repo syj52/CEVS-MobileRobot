@@ -8,11 +8,14 @@ import { state } from '../state.js';
 import { navApi } from '../api/navigation.js';
 import { speak } from './ttsService.js';
 import { poiApi } from '../api/poi.js';
-import { debugOdom, getTagMap, setTagMapEntry, deleteTagMapEntry, getTagFusionStatus, lastTagPose, pushPosToEsp } from './tcp.js';
+import { debugOdom, getTagMap, setTagMapEntry, deleteTagMapEntry, getTagFusionStatus, lastTagPose, pushPosToEsp, rawTagObs } from './tcp.js';
 import { broadcast } from './websocket.js';
 import { startTagNav, cancelTagNav, getTagNavStatus } from '../api/tagNav.js';
-import { goodsApi } from '../api/goods.js';
+import { goodsApi, pickDirect } from '../api/goods.js';
 import { startTurnCalib, startDriveCalib, cancelCalib, getCalibStatus } from './motionCalib.js';
+import { chatCompletion } from './dashscope.js';
+import { executeCommand } from './commandExecutor.js';
+import { buildKnowledgeContext } from './knowledgeBase.js';
 
 let sendToEsp: ((msg: string) => void) | null = null;
 export function setSendToEsp(fn: (msg: string) => void) { sendToEsp = fn; }
@@ -132,6 +135,22 @@ export function createExpressApp(httpServer?: HttpServer) {
   app.post('/api/stop', (_req, res) => { navApi.stop(); res.json({ ok: true }); });
   app.post('/api/nav-path', (req, res) => navApi.handleNavPath(req, res));
 
+  // 固定路径模式: !PATH:<n>#  → STM32 按预设轨迹移动
+  app.post('/api/path/:id', (req, res) => {
+    const n = parseInt(req.params.id);
+    console.log(`[path] POST /api/path/${n} called, sendToEsp=${!!sendToEsp}`);
+    if (isNaN(n) || n < 0 || n > 6) return res.status(400).json({ error: 'invalid path id (0-6)' });
+    const cmd = `!PATH:${n}#`;
+    if (sendToEsp) {
+      sendToEsp(cmd + '\r\n');
+      console.log(`[path] → sent: ${cmd}`);
+    } else {
+      console.error('[path] sendToEsp is null!');
+    }
+    state.updateRobot({ status: n === 0 ? 'idle' : 'moving' });
+    res.json({ ok: true, path: n });
+  });
+
   // Motor manual control
   app.post('/api/motor', (req, res) => {
     const { frame } = req.body as { frame?: string };
@@ -149,6 +168,12 @@ export function createExpressApp(httpServer?: HttpServer) {
     if (sendToEsp) sendToEsp(cmd + '\r\n');
     console.log(`[debug] sent to ESP: ${cmd}`);
     res.json({ ok: true, cmd });
+  });
+  // 🎯 Tag + camera calibration endpoints
+  app.get('/api/calib/observations', (_req, res) => res.json(rawTagObs));
+  app.delete('/api/calib/observations', (_req, res) => {
+    for (const k of Object.keys(rawTagObs)) delete rawTagObs[Number(k)];
+    res.json({ ok: true, cleared: true });
   });
   // Camera intrinsics config
   const cameraCfgPath = join(__dirname, '..', '..', 'config', 'camera.json');
@@ -207,9 +232,36 @@ export function createExpressApp(httpServer?: HttpServer) {
   app.post('/api/goods/pick', (req, res) => goodsApi.pick(req, res));
   app.post('/api/goods/cancel', (req, res) => goodsApi.cancel(req, res));
 
+  // 固定轨迹: 手动触发 STM32 走预定路径
+  //   POST /api/trajectory/shelf_a  →  $TRAJ:shelf_a\r\n
+  app.post('/api/trajectory/:id', (req, res) => {
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'trajectory id required' });
+    const cmd = `$TRAJ:${id}\r\n`;
+    if (sendToEsp) sendToEsp(cmd);
+    console.log(`[traj] → ${cmd.trim()}`);
+    res.json({ ok: true, trajectory: id });
+  });
+
   // 扫码取货确认页 (二维码指向 /pick?goods=<id>)
   app.get('/pick', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'pick.html')));
+  app.get('/nav', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'nav.html')));
   app.use(express.static(PUBLIC_DIR));
+
+  // QR code generator
+  app.get('/api/qr', (req, res) => {
+    const text = (req.query.text as string) || 'http://' + req.hostname + ':8000/nav';
+  // QR code generator
+  app.get('/api/qr', (req, res) => {
+    const text = (req.query.text as string) || 'http://' + req.hostname + ':8000/nav';
+    const { spawnSync } = require('child_process');
+    const script = join(__dirname, '..', 'scripts', 'gen_qr.py');
+    const py = spawnSync('python', [script, text]);
+    if (py.error || py.status !== 0) return res.status(500).json({ error: 'QR failed' });
+    res.setHeader('Content-Type', 'image/png');
+    res.send(py.stdout);
+  });
+  });
 
   // TTS test — text → edge-tts → ESP32 speaker
   app.post('/api/tts', async (req, res) => {
@@ -226,24 +278,83 @@ export function createExpressApp(httpServer?: HttpServer) {
     }
   });
 
-  // LLM
+  // ─── 积极人格系统提示词 ──────────────────────────────────────
+  const CHAT_SYSTEM_PROMPT = `你是一个热情友好的仓库物流机器人助手，名字叫"小E"，搭载在 CEVS 移动平台上。
+
+你的性格特点：
+- 温暖、积极、有礼貌，喜欢用语气词
+- 对用户的每个问题和指令都充满热情地回应
+- 即使不理解也会友善地引导用户，不会冷漠地说"不知道"
+- 你是仓库里的好帮手，乐于助人
+- ⚡ 回复必须简练明快，控制在 20 字以内，说重点
+
+当用户下达操作指令时，请输出以下 JSON 格式（回复和指令都要有）：
+{
+  "reply": "你对用户的热情回复，说明即将执行的操作",
+  "cmd": "pick 或 goto 或 nav 或 stop 或 return 或 path 或 continue",
+  "goods": "货物名称（仅当 cmd=pick 时）",
+  "target": "地点名称（仅当 cmd=goto 时，提取用户说的点位名，如接待区、充电站）",
+  "x": 目标坐标X（仅当 cmd=nav 时）,
+  "y": 目标坐标Y（仅当 cmd=nav 时）
+  "path_id": 路径编号1-6（仅当 cmd=path 时）
+}
+
+当用户只是普通聊天时，输出：
+{
+  "reply": "你的热情回复",
+  "cmd": "none"
+}
+
+可识别的指令：
+- 取货/去取: cmd=pick，提取货物名称放入 goods
+- 去某个地点: cmd=goto，提取地点名称放入 target（如"接待区""充电站""A点"）
+- 导航/去某个坐标: cmd=nav，提取坐标放入 x/y
+- 停止/停车/刹车: cmd=stop
+- 返回/回原点/回来/回程: cmd=return
+- 走路径/执行路径: cmd=path
+- 继续/返程/继续路径: cmd=continue，提取路径编号放入 path_id（1-6）
+
+注意：只输出一个 JSON 对象，不要多余文字和解释。回复控制在 20 字以内，简练明快。`;
+
+  // LLM — 积极人格 + 指令解析 + TTS 播报
   app.post('/api/llm/chat', async (req, res) => {
     const { message, session_id } = req.body || {};
     if (!message) return res.status(400).json({ error: 'message required' });
     try {
-      const resp = await fetch('http://localhost:11434/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'qwen2.5:7b',
-          messages: [{ role: 'user', content: message }],
-          stream: false,
-        }),
-      });
-      const data = await resp.json() as any;
-      res.json({ reply: data.message?.content || '(empty)', session_id: session_id || 'default' });
+      // 注入 POI + 知识库信息
+      const poiList = state.pois.map(p =>
+        `  - ${p.name}${p.description ? ` (${p.description})` : ''}: 坐标(${p.coord_x}, ${p.coord_y})`
+      ).join('\n');
+      const poiContext = poiList ? `\n当前已知地点列表：\n${poiList}\n` : '';
+      const kbContext = buildKnowledgeContext(message);
+
+      const rawContent = await chatCompletion([
+        { role: 'system', content: CHAT_SYSTEM_PROMPT + poiContext + kbContext },
+        { role: 'user', content: message },
+      ]);
+
+      // 解析 JSON 回复
+      let displayReply = rawContent;
+      let cmd: any = { cmd: 'none' };
+      const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          displayReply = parsed.reply || rawContent.replace(jsonMatch[0], '').trim() || '(收到～) 😊';
+          cmd = { cmd: parsed.cmd || 'none', reply: parsed.reply, ...parsed };
+        } catch {
+          displayReply = rawContent;
+        }
+      }
+
+      // 执行指令
+      const executed = cmd.cmd && cmd.cmd !== 'none' ? executeCommand(cmd, message) : false;
+
+      res.json({ reply: displayReply, cmd, executed, session_id: session_id || 'default' });
     } catch (e) {
-      res.json({ reply: `LLM error: ${(e as Error).message}`, session_id: session_id || 'default' });
+      const errMsg = (e as Error).message;
+      console.error(`[chat] LLM 请求失败: ${errMsg}`);
+      res.json({ reply: `哎呀，遇到点小问题：${errMsg}，再试一次吧～ 🤗`, cmd: { cmd: 'none' }, executed: false, session_id: session_id || 'default' });
     }
   });
 
