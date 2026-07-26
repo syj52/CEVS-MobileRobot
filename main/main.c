@@ -24,7 +24,6 @@
 #include "motion.h"
 #include "display_driver.h"
 #include "qrcodegen.h"
-#include "qrcodegen.h"
 #include "nav/nav_grid.h"
 static const char *TAG = "MAIN";
 static camera_context s_cam_ctx;
@@ -120,16 +119,16 @@ void app_main(void) {
     else ESP_LOGW(TAG, "WiFi timeout");
     /* MIPI DSI Display — init AFTER WiFi to avoid SDIO conflict */
     r = display_init();
-    /* Build QR URL from server IP for nav page */
-    char qr_url[128];
-    snprintf(qr_url, sizeof(qr_url), "http://%s:8000/nav",
-             tcp_client_get_server_host() ? tcp_client_get_server_host() : "192.168.1.1");
-    ESP_LOGI(TAG, "QR URL: %s", qr_url);
     if (r != ESP_OK) ESP_LOGE(TAG, "Display init failed");
     else ESP_LOGI(TAG, "Display ready");
     /* TCP client (command/control + video frames) */
     tcp_client_init(CONFIG_PC_SERVER_IP, CONFIG_PC_SERVER_PORT);
     tcp_client_start();
+    /* Build QR URL from server IP after TCP init */
+    char qr_url[128];
+    snprintf(qr_url, sizeof(qr_url), "http://%s:8000/nav",
+             tcp_client_get_server_host() ? tcp_client_get_server_host() : "192.168.1.1");
+    ESP_LOGI(TAG, "QR URL: %s", qr_url);
     /* HTTP server (static content + audio) */
     start_streaming_server();
     /* Video: HW JPEG encoder pipeline */
