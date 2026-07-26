@@ -436,6 +436,68 @@ esp_err_t display_render_target(float tx_m, float ty_m)
     return ESP_OK;
 }
 
+/* ─── QR code rendering ───────────────────────────────────── */
+
+#include "qrcodegen.h"
+
+esp_err_t display_render_qr(const char *url, int module_px, int margin_px)
+static esp_err_t display_render_qr_bitmap(const uint8_t qrcode[], int size, int module_px, int margin_px);
+{
+    if (!s_disp.ready || !s_disp.fb) return ESP_ERR_INVALID_STATE;
+    if (!url || !*url) return ESP_ERR_INVALID_ARG;
+
+    /* Generate QR code (version 2 = 25x25 modules) */
+    uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(2)];
+    uint8_t tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(2)];
+    if (!qrcodegen_encodeText(url, tmp, qr, qrcodegen_Ecc_LOW,
+            qrcodegen_VERSION_MIN, 2, qrcodegen_Mask_AUTO, true)) {
+        ESP_LOGW(TAG, "QR encode failed (URL too long?), trying version 3");
+        uint8_t qr3[qrcodegen_BUFFER_LEN_FOR_VERSION(3)];
+        uint8_t tmp3[qrcodegen_BUFFER_LEN_FOR_VERSION(3)];
+        if (!qrcodegen_encodeText(url, tmp3, qr3, qrcodegen_Ecc_LOW,
+                qrcodegen_VERSION_MIN, 3, qrcodegen_Mask_AUTO, true)) {
+            ESP_LOGE(TAG, "QR encode failed for: %s", url);
+            return ESP_FAIL;
+        }
+        return display_render_qr_bitmap(qr3, qrcodegen_getSize(qr3), module_px, margin_px);
+    }
+    return display_render_qr_bitmap(qr, qrcodegen_getSize(qr), module_px, margin_px);
+}
+
+static esp_err_t display_render_qr_bitmap(const uint8_t qrcode[], int size, int module_px, int margin_px)
+{
+    int qr_dim = (size + 2 * margin_px) * module_px;
+    int ox = DISPLAY_H_RES - qr_dim - 8;   /* right-aligned, 8px edge margin */
+    int oy = 8;                              /* top-aligned */
+
+    for (int my = 0; my < size + 2 * margin_px; my++) {
+        for (int mx = 0; mx < size + 2 * margin_px; mx++) {
+            bool white;
+            if (my < margin_px || my >= size + margin_px ||
+                mx < margin_px || mx >= size + margin_px) {
+                white = true;   /* quiet zone */
+            } else {
+                int y = my - margin_px;
+                int x = mx - margin_px;
+                white = (qrcodegen_getModule(qrcode, x, y) == 0);
+            }
+            uint16_t color = white ? 0xFFFF : 0x0000;  /* white or black */
+            int px = ox + mx * module_px;
+            int py = oy + my * module_px;
+            for (int dy = 0; dy < module_px; dy++) {
+                for (int dx = 0; dx < module_px; dx++) {
+                    int sx = px + dx, sy = py + dy;
+                    if (sx >= 0 && sx < DISPLAY_H_RES && sy >= 0 && sy < DISPLAY_V_RES)
+                        s_disp.fb[sy * DISPLAY_H_RES + sx] = color;
+                }
+            }
+        }
+    }
+    ESP_LOGI(TAG, "QR rendered: size=%d module=%d (%d×%d px) @(%d,%d)",
+             size, module_px, qr_dim, qr_dim, ox, oy);
+    return ESP_OK;
+}
+
 /* ─── Flush framebuffer to panel ─────────────────────────────── */
 
 esp_err_t display_flush_fb(void)

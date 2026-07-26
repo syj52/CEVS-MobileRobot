@@ -81,6 +81,10 @@ esp_err_t display_render_pose(float rx_m, float ry_m, float angle_deg);
  *  Requires display_render_map() to have been called first. */
 esp_err_t display_render_target(float tx_m, float ty_m);
 
+/** Render QR code from URL at specified corner (size=module_px).
+ *  Overlays onto the existing framebuffer — call after display_render_map. */
+esp_err_t display_render_qr(const char *url, int module_px, int margin_px);
+
 /** Flush current framebuffer to panel. */
 esp_err_t display_flush_fb(void);
 

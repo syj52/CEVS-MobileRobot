@@ -24,3 +24,4 @@ int       tcp_client_send_nonblock(const char *data, int len);  // 0=skip, 1=sen
 #endif
 
 #endif /* TCP_CLIENT_H */
+const char *tcp_client_get_server_host(void);

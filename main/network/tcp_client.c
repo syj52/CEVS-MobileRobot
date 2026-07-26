@@ -784,3 +784,4 @@ int tcp_client_send_nonblock(const char *data, int len)
     }
     return 0;  /* buffer full — caller should skip this frame */
 }
+const char *tcp_client_get_server_host(void) { return s_host; }
