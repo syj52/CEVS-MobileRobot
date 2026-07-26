@@ -95,9 +95,11 @@ static void sender_task(void *arg) {
     }
 }
 static void on_stm32_rx(const char *line) {
-    /* 转发 STM32 遥测数据到 TCP 服务器（odom/imu/pose 用于定位+标定） */
+    /* 转发 STM32 遥测 + 执行反馈到 TCP（UART 解析已去掉 \r\n，这里补上） */
     if (tcp_client_is_connected() && line && (line[0] == '$' || strncmp(line, "EXEC:", 5) == 0)) {
-        tcp_client_send(line);
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf), "%s\r\n", line);
+        tcp_client_send(buf);
     }
 }
 void app_main(void) {
