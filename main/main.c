@@ -104,8 +104,10 @@ static void sender_task(void *arg) {
 }
 
 static void on_stm32_rx(const char *line) {
-    /* STM32 telemetry stays on ESP32 for local processing. No TCP forward. */
-    (void)line;
+    /* 转发 STM32 遥测数据到 TCP 服务器（odom/imu/pose 用于定位+标定） */
+    if (tcp_client_is_connected() && line && line[0] == '$') {
+        tcp_client_send(line);
+    }
 }
 
 void app_main(void) {

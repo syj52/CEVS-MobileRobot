@@ -32,12 +32,16 @@ static const char *TAG = "ATAG";
 /* ─── Constants — matches video_dev.c 1280×720 ──────────────── */
 #define CAM_W       1280
 #define CAM_H       720
-#define CAM_FX      800.0f
-#define CAM_FY      800.0f
-#define CAM_CX      640.0f
-#define CAM_CY      360.0f
+/* █████████████████████████████████████████████████████████████████████
+ * 标定值（camera.json）—— 原硬编码 fx=fy=800 导致 solvePnP 距离偏差 2.2×！
+ * 必须在标定后同步到此处。
+ * █████████████████████████████████████████████████████████████████████ */
+#define CAM_FX      1775.36f
+#define CAM_FY      1707.81f
+#define CAM_CX      683.41f
+#define CAM_CY      344.27f
 
-#define DEFAULT_TAG_SIZE_MM  70.0f
+#define DEFAULT_TAG_SIZE_MM  168.0f   /* 168mm 标定标签 */
 
 /*
  * Detection interval.  With the pipelined video_fb_get producing ~30fps
