@@ -8,6 +8,7 @@ idf_component_register(
          "motion.c"
          "apriltag_detect.c"
          "display_driver.c"
+         "qrcodegen.c"
          "network/wifi_manager.c"
          "network/tcp_client.c"
          "nav/nav_grid.c"
