@@ -3,6 +3,7 @@
  *
  * Camera: esp_video → HW JPEG encoder → TCP to server → WebSocket → frontend
  * Mic:    ES8311 → I2S → HTTP WAV (http://<ip>/mic.wav)
+#include <string.h>
  */
 #include <stdio.h>
 #include <string.h>
@@ -95,7 +96,7 @@ static void sender_task(void *arg) {
 }
 static void on_stm32_rx(const char *line) {
     /* 转发 STM32 遥测数据到 TCP 服务器（odom/imu/pose 用于定位+标定） */
-    if (tcp_client_is_connected() && line && line[0] == '$') {
+    if (tcp_client_is_connected() && line && (line[0] == '$' || strncmp(line, "EXEC:", 5) == 0)) {
         tcp_client_send(line);
     }
 }
