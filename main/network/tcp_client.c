@@ -525,10 +525,12 @@ static void tcp_client_task(void *arg)
                              (uint16_t)smp[0], (uint16_t)smp[1], (uint16_t)smp[2], (uint16_t)smp[3],
                              (uint16_t)smp[4], (uint16_t)smp[5], (uint16_t)smp[6], (uint16_t)smp[7]);
                 }
-                audio_spk_play(s_tts_buf, s_tts_recv);
+                if (audio_spk_play(s_tts_buf, s_tts_recv) != ESP_OK) {
+                    ESP_LOGE(TAG, "TTS play buffer full, reconnecting");
+                    close(s_sock); s_sock = -1; s_connected = false;
+                }
                 free(s_tts_buf); s_tts_buf = NULL;
                 s_tts_need = 0; s_tts_recv = 0;
-                /* 清掉 s_line_buf 残留的 PCM 数据，防止被 LINE 解析器当命令处理 */
                 s_line_len = 0;
             }
         }
@@ -595,10 +597,13 @@ tts_drain:
                              (uint16_t)smp[0], (uint16_t)smp[1], (uint16_t)smp[2], (uint16_t)smp[3],
                              (uint16_t)smp[4], (uint16_t)smp[5], (uint16_t)smp[6], (uint16_t)smp[7]);
                 }
-                audio_spk_play(s_tts_buf, s_tts_recv);
+                if (audio_spk_play(s_tts_buf, s_tts_recv) != ESP_OK) {
+                    ESP_LOGE(TAG, "TTS play buffer full, reconnecting");
+                    close(s_sock); s_sock = -1; s_connected = false;
+                }
                 free(s_tts_buf); s_tts_buf = NULL;
                 s_tts_need = 0; s_tts_recv = 0;
-                s_line_len = 0; /* clear residual PCM from line buffer */
+                s_line_len = 0;
             }
         }
 

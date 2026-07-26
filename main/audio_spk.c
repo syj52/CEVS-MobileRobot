@@ -30,7 +30,7 @@ static const char *TAG = "AUDIO_SPK";
 #define SPK_DOUT        GPIO_NUM_22
 
 /* Playback ring buffer: up to ~4 seconds at 16kHz/16bit */
-#define SPK_RING_BUF_SIZE    (16000 * 2 * 4)   /* 128 KB */
+#define SPK_RING_BUF_SIZE    (16000 * 2 * 10)  /* 320 KB — 支持最长 10 秒语音 */
 
 static RingbufHandle_t s_play_buf = NULL;
 static bool s_playing = false;
