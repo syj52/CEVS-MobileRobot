@@ -8,6 +8,8 @@ import './style.css';
 // ─── State ──────────────────────────────────────────────────
 interface RobotState { position: { x: number; y: number; angle: number }; status: string; battery: number; tcpConnected: boolean; }
 let robot: RobotState = { position: { x: 0, y: 0, angle: 0 }, status: 'idle', battery: 100, tcpConnected: false };
+/** Smoothed position for visual rendering (interpolates toward robot.position) */
+let displayPos = { x: 0, y: 0, angle: 0 };
 let navPath: [number, number][] = [];
 let drawObstacleMode = false;  /* toggle for obstacle painting */
 let goalMarker: { x: number; y: number } | null = null;
@@ -92,7 +94,7 @@ scene.add(gridHelper);
 
 // Robot marker
 let sceneModel: THREE.Group | null = null;
-const MODEL_PATH = '/models/export.glb';
+const MODEL_PATH = '/models/202607261435.glb';
 new GLTFLoader().load(MODEL_PATH,
   (gltf) => {
     sceneModel = gltf.scene; scene.add(gltf.scene);
@@ -395,6 +397,33 @@ function animate() {
 }
 animate();
 
+// ─── Smooth position interpolation ──────────────────────────
+function tickPosition() {
+  const dx = robot.position.x - displayPos.x;
+  const dy = robot.position.y - displayPos.y;
+  let da = robot.position.angle - displayPos.angle;
+  while (da > Math.PI) da -= 2 * Math.PI;
+  while (da < -Math.PI) da += 2 * Math.PI;
+
+  const dist = Math.hypot(dx, dy);
+  if (dist > 0.001 || Math.abs(da) > 0.005) {
+    // Faster convergence for large jumps, gentle for small drifts
+    const alpha = dist > 0.05 ? 0.2 : 0.12;
+    displayPos.x += dx * alpha;
+    displayPos.y += dy * alpha;
+    displayPos.angle += da * alpha;
+
+    // Update 3D (always active — user can switch tabs freely)
+    robotGroup.position.set(displayPos.x, 0, displayPos.y);
+    robotGroup.rotation.y = Math.PI / 2 - displayPos.angle;
+
+    // Redraw 2D map if visible
+    if (currentTab === 'map') drawMap();
+  }
+  requestAnimationFrame(tickPosition);
+}
+tickPosition();
+
 // ─── WebSocket ──────────────────────────────────────────────
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -523,9 +552,7 @@ function updateUI() {
   document.getElementById('status-robot')!.textContent = `位置: (${robot.position.x.toFixed(2)}, ${robot.position.y.toFixed(2)})`;
   document.getElementById('status-mode')!.textContent = `状态: ${robot.status}`;
 
-  // 3D robot
-  robotGroup.position.set(robot.position.x, 0, robot.position.y);
-  robotGroup.rotation.y = Math.PI / 2 - robot.position.angle;
+  // Note: 3D robot position is updated by tickPosition() animation loop
 
   if (currentTab === 'map') drawMap();
 }
@@ -812,7 +839,7 @@ async function drawMap() {
   if (tagMap) {
     for (const [idStr, entry] of Object.entries(tagMap)) {
       const tpx = worldToCanvasX((entry as any).x, cellSize, offsetX);
-      const tpy = worldToCanvasY(-(entry as any).y, cellSize, offY);
+      const tpy = worldToCanvasY((entry as any).y, cellSize, offY);
       const yaw = (entry as any).yaw || 0;
       // Ceiling tag: square outline (top-down projection)
       const hs = 7;
@@ -831,17 +858,17 @@ async function drawMap() {
     }
   }
 
-  // Robot
-  const cx = worldToCanvasX(robot.position.x, cellSize, offsetX);
-  const cy = worldToCanvasY(robot.position.y, cellSize, offY);
+  // Robot (使用插值位置 displayPos 平滑移动)
+  const cx = worldToCanvasX(displayPos.x, cellSize, offsetX);
+  const cy = worldToCanvasY(displayPos.y, cellSize, offY);
   mapCtx.fillStyle = '#3b82f6';
   mapCtx.beginPath();
   mapCtx.arc(cx, cy, 8, 0, Math.PI * 2);
   mapCtx.fill();
 
-  const headingDeg = (robot.position.angle * 180 / Math.PI) % 360;
-  const endX = cx + 25 * Math.cos(robot.position.angle);
-  const endY = cy - 25 * Math.sin(robot.position.angle);  /* Y flipped */
+  const headingDeg = (displayPos.angle * 180 / Math.PI) % 360;
+  const endX = cx + 25 * Math.cos(displayPos.angle);
+  const endY = cy - 25 * Math.sin(displayPos.angle);  /* Y flipped */
   mapCtx.strokeStyle = '#ef4444';
   mapCtx.lineWidth = 3;
   mapCtx.beginPath();
@@ -1959,6 +1986,7 @@ pollTagNav();
   try {
     const r = await fetch(`${API}/robot`);
     robot = await r.json();
+    displayPos = { ...robot.position };
     updateUI();
     loadPoi();
     await loadTags(); // populates tag chips + 3D ceiling markers + 2D map

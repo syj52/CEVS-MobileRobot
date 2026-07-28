@@ -123,13 +123,15 @@ const SYSTEM_PROMPT = `你是一个热情友好的仓库物流机器人指令解
 - 导航/去某个位置 → cmd=nav，提取坐标
 - 停止/停车 → cmd=stop
 - 返回原点/回程 → cmd=return
-- 走路径/执行路径: cmd=path
+- 走路径/执行路径/去货架取货/货架取货 → cmd=path，从货架编号提取 path_id（1-6）
+  (例如"去货架6取货"→{reply:"好的，去货架6取货。",cmd:"path",path_id:6})
 - 继续/返程/继续路径: cmd=continue，提取路径编号放入 path_id（1-6）
 - 其他聊天 → cmd=unknown（回复要友善热情）
 
 示例：
 "带我去接待区" → {"reply":"好的，带您去接待区。","cmd":"goto","target":"接待区"}
-"去A03货架取螺丝" → {"reply":"好的，去A03货架取螺丝。","cmd":"pick","goods":"螺丝"}
+"去货架6取货" → {"reply":"好的，去货架6取货。","cmd":"path","path_id":6}
+"货架3取货" → {"reply":"好的，去货架3取货。","cmd":"path","path_id":3}
 "到坐标3,2" → {"reply":"好的，去坐标3,2位置。","cmd":"nav","x":3,"y":2}
 "停车" → {"reply":"收到，已停止。","cmd":"stop"}
 "你好" → {"reply":"你好，我是小E，有什么可以帮你的？","cmd":"unknown"}
@@ -199,8 +201,8 @@ export async function processVoicePcm(pcm: Buffer, sampleRate = 16000) {
 
   if (cmdHandler) cmdHandler(cmd, text);
 
-  // 朗读 LLM 的热情回复
-  if (cmd.reply) {
+  // 朗读 LLM 的热情回复 (路径指令不朗读, 避免 TTS 音频挤断 TCP 导致路径中断)
+  if (cmd.reply && cmd.cmd !== 'path') {
     console.log(`[voice] 🔊 TTS: "${cmd.reply}"`);
     speak(cmd.reply, 0.7).catch(e => console.warn('[voice] TTS fail:', e));
   }

@@ -17,3 +17,7 @@ __pycache__/
 *.pyo
 .env
 .local
+cad/
+*.tsbuildinfo
+.vscode/
+.idea/

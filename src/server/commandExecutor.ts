@@ -7,6 +7,8 @@ import { state } from '../state.js';
 import { navApi } from '../api/navigation.js';
 import { startTagNav } from '../api/tagNav.js';
 import { pickDirect } from '../api/goods.js';
+import { startPath } from './pathPlanner.js';
+
 import { broadcast } from './websocket.js';
 
 /** TCP 发送回调（由 main.ts 注入） */
@@ -74,6 +76,7 @@ export function executeCommand(cmd: ParsedCmd, text?: string): boolean {
         const n = typeof cmd.path_id === 'number' ? cmd.path_id : parseInt(cmd.path_id || '0');
         if (n >= 1 && n <= 6 && sendRawToEsp) {
           sendRawToEsp(`!PATH:${n}#\r\n`);
+          startPath(n);
           state.updateRobot({ status: 'moving' });
           executed = true;
         }
@@ -88,10 +91,12 @@ export function executeCommand(cmd: ParsedCmd, text?: string): boolean {
       break;
 
     case 'return':
-      console.log('[exec] → return');
-      startTagNav([{ x: 0, y: 0 }]);
-      state.updateRobot({ status: 'moving' });
-      executed = true;
+      console.log('[exec] → return (PATH continue)');
+      if (sendRawToEsp) {
+        sendRawToEsp("!PATH:0#\r\n");
+        state.updateRobot({ status: 'moving' });
+        executed = true;
+      }
       break;
     case 'continue':
       console.log('[exec] -> continue (PATH continue)');

@@ -94,16 +94,17 @@ export const navApi = {
       state.updateRobot({ status: 'idle' });
     } else if (line.startsWith('EXEC:PATH_WAIT')) {
       state.updateRobot({ status: 'idle' });
-      console.log('[nav] PATH_WAIT — arrived, auto-continue in 2s');
-      if (sendToAll) {
-        setTimeout(() => {
-          if (sendToAll) {
-            sendToAll('!PATH:0#');
-            console.log('[nav] 🔄 PATH continue sent');
-            state.updateRobot({ status: 'moving' });
-          }
-        }, 2000);
+      console.log('[nav] PATH_WAIT — arrived, auto-continue');
+      // 发送 !PATH:0# 并重试 3 次, 防止 TCP/UART 丢消息
+      function sendContinue(retry = 0) {
+        if (!sendToAll) return;
+        sendToAll('!PATH:0#');
+        console.log(`[nav] 🔄 PATH continue sent (retry=${retry})`);
+        if (retry < 4) {
+          setTimeout(() => sendContinue(retry + 1), 1500);
+        }
       }
+      setTimeout(() => sendContinue(0), 1800);
     } else if (line.startsWith('EXEC:PATH_DONE')) {
       state.updateRobot({ status: 'idle' });
       console.log('[nav] PATH_DONE — trajectory complete');

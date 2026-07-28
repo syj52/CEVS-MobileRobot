@@ -16,7 +16,7 @@ import { startTurnCalib, startDriveCalib, cancelCalib, getCalibStatus } from './
 import { chatCompletion } from './dashscope.js';
 import { executeCommand } from './commandExecutor.js';
 import { buildKnowledgeContext } from './knowledgeBase.js';
-import { getPathSegments, applySegment } from './pathPlanner.js';
+import { getPathSegments, applySegment, startPath } from './pathPlanner.js';
 
 let sendToEsp: ((msg: string) => void) | null = null;
 export function setSendToEsp(fn: (msg: string) => void) { sendToEsp = fn; }
@@ -148,6 +148,7 @@ export function createExpressApp(httpServer?: HttpServer) {
     } else {
       console.error('[path] sendToEsp is null!');
     }
+    if (n >= 1 && n <= 6) startPath(n);  /* 启动服务器端位置模拟, 跟随 EXEC:NAV_S 更新位置 */
     state.updateRobot({ status: n === 0 ? 'idle' : 'moving' });
     res.json({ ok: true, path: n });
   });
@@ -312,7 +313,8 @@ export function createExpressApp(httpServer?: HttpServer) {
 - 导航/去某个坐标: cmd=nav，提取坐标放入 x/y
 - 停止/停车/刹车: cmd=stop
 - 返回/回原点/回来/回程: cmd=return
-- 走路径/执行路径: cmd=path
+- 走路径/执行路径/去货架取货/货架取货 → cmd=path，从货架编号提取 path_id（1-6）
+  (例如"去货架6取货"→{reply:"好的，去货架6取货。",cmd:"path",path_id:6})
 - 继续/返程/继续路径: cmd=continue，提取路径编号放入 path_id（1-6）
 
 注意：只输出一个 JSON 对象，不要多余文字和解释。回复控制在 20 字以内，简练明快。`;

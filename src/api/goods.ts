@@ -119,6 +119,54 @@ function triggerDrop(goods: Goods) {
   }, 3000);
 }
 
+// ─── 内部取货逻辑 (不依赖 Express req/res, 供 API 和语音共用) ──
+function internalPick(goodsId: string): { ok: boolean; error?: string; goods?: Goods; order?: PickOrder } {
+  const goods = GOODS[goodsId];
+  if (!goods) return { ok: false, error: '货物不存在' };
+
+  if (currentOrder && ['navigating', 'arrived', 'dropping'].includes(currentOrder.status)) {
+    return { ok: false, error: '小车忙碌中' };
+  }
+
+  currentOrder = {
+    goodsId: goods.id,
+    status: 'navigating',
+    startedAt: Date.now(),
+    message: `导航至货位 ${goods.shelf || goods.id}`,
+  };
+
+  // 有 tag → AprilTag 导航到货位再回原点
+  if (goods.tag !== undefined) {
+    const waypoints = [{ tag: goods.tag }, { x: 0, y: 0 }];
+    const navResult = startTagNav(waypoints);
+    if ((navResult as any).error) {
+      currentOrder.status = 'error';
+      currentOrder.message = `导航失败: ${(navResult as any).error}`;
+      return { ok: false, error: currentOrder.message };
+    }
+    state.updateRobot({ status: 'moving' });
+    startArrivalWatch(goods);
+    console.log(`[goods] 🚚 tag-nav 取货: ${goods.name}`);
+    return { ok: true, goods, order: currentOrder };
+  }
+
+  // 无 tag 但有固定轨迹 → 走 STM32 路径 (如货架1-6)
+  if (goods.trajectoryId) {
+    currentOrder.status = 'done';
+    currentOrder.message = `执行轨迹 ${goods.trajectoryId}`;
+    if (trajectoryNotifier) {
+      trajectoryNotifier(goods.trajectoryId);
+      console.log(`[goods] 🛤️ 轨迹取货: ${goods.name} → ${goods.trajectoryId}`);
+      return { ok: true, goods, order: currentOrder };
+    } else {
+      currentOrder.message = '轨迹发送器未配置';
+      return { ok: false, error: '轨迹发送器未配置' };
+    }
+  }
+
+  return { ok: false, error: '货物没有关联 AprilTag 或固定轨迹' };
+}
+
 // ─── REST API ───────────────────────────────────────────────
 
 export const goodsApi = {
@@ -155,41 +203,13 @@ export const goodsApi = {
     const goodsId = req.body?.goodsId || req.query.goods;
     if (!goodsId) return res.status(400).json({ error: '缺少 goodsId' });
 
-    const goods = GOODS[goodsId as string];
-    if (!goods) return res.status(404).json({ error: '货物不存在' });
-
-    // 检查是否有正在进行的订单
-    if (currentOrder && ['navigating', 'arrived', 'dropping'].includes(currentOrder.status)) {
-      return res.status(409).json({ error: '小车忙碌中', current: currentOrder });
+    const result = internalPick(goodsId as string);
+    if (!result.ok) {
+      const code = result.error?.includes('忙碌') ? 409 : 400;
+      return res.status(code).json({ error: result.error });
     }
-
-    // 创建订单
-    currentOrder = {
-      goodsId: goods.id,
-      status: 'navigating',
-      startedAt: Date.now(),
-      message: `导航至货位 ${goods.shelf || goods.id}`,
-    };
-
-    // Tag-only navigation — shelf must have a tag
-    if (goods.tag === undefined) {
-      return res.status(400).json({ error: '货物没有关联 AprilTag' });
-    }
-    // Go to shelf → return to origin
-    const waypoints = [{ tag: goods.tag }, { x: 0, y: 0 }];
-
-    const navResult = startTagNav(waypoints);
-    if ((navResult as any).error) {
-      currentOrder.status = 'error';
-      currentOrder.message = `导航失败: ${(navResult as any).error}`;
-      return res.status(500).json({ error: currentOrder.message });
-    }
-
-    state.updateRobot({ status: 'moving' });
-    startArrivalWatch(goods);
-
-    console.log(`[goods] 🚚 取货开始: ${goods.name} → (${goods.x},${goods.y})`);
-    res.json({ ok: true, goods, order: currentOrder });
+    console.log(`[goods] 🚚 取货开始: ${result.goods!.name}`);
+    res.json({ ok: true, goods: result.goods, order: result.order });
   },
 
   /** 查询取货订单状态 */
@@ -208,19 +228,18 @@ export const goodsApi = {
 
 export function getGoods(id: string): Goods | undefined { return GOODS[id]; }
 
-/** 语音取货: 通过货物名模糊匹配并直接派车 */
+/** 语音/文字取货: 通过货物名模糊匹配并直接派车 (不依赖 Express) */
 export function pickDirect(query: string) {
   // Try exact ID match first
   if (GOODS[query]) {
-    goodsApi.pick({ body: { goodsId: query } } as any, { json: (v: any) => v } as any);
-    return { ok: true, matched: 'id', goods: GOODS[query] };
+    return internalPick(query);
   }
   // Fuzzy name match
   const q = query.toLowerCase();
   for (const [id, g] of Object.entries(GOODS)) {
     if (g.name.toLowerCase().includes(q) || g.shelf?.toLowerCase().includes(q)) {
-      goodsApi.pick({ body: { goodsId: id } } as any, { json: (v: any) => v } as any);
-      return { ok: true, matched: 'name', goods: g };
+      const result = internalPick(id);
+      return result.ok ? { ...result, matched: 'name' } : result;
     }
   }
   return { ok: false, error: `未找到与"${query}"匹配的货物` };
