@@ -347,9 +347,9 @@ esp_err_t audio_mic_init(void)
     }
 
     /* Set mic input gain to a reasonable level (dB) */
-    int gain_ret = esp_codec_dev_set_in_gain(s_codec_dev, 30.0f);
+    int gain_ret = esp_codec_dev_set_in_gain(s_codec_dev, 42.0f);
     if (gain_ret == ESP_CODEC_DEV_OK) {
-        ESP_LOGI(TAG, "Mic gain set to 30.0 dB");
+        ESP_LOGI(TAG, "Mic gain set to 42.0 dB");
     } else {
         ESP_LOGW(TAG, "Mic gain set returned %d (might be normal)", gain_ret);
     }

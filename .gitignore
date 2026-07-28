@@ -9,3 +9,5 @@ center_real/
 .DS_Store
 Thumbs.db
 .cache/
+.vscode/
+.idea/
